@@ -1,873 +1,108 @@
-<!DOCTYPE html>
-<html>
-<head>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VibePaWiz — Explorative Visualization of Scientific Citation Networks</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <h1>VibePaWiz</h1>
+        <p class="subtitle">Explorative visualization of scientific citation networks</p>
+      </header>
 
-<meta charset="utf-8">
-<title>SciPaWiz: A Tool For Explorative Visualization Of Scientific Citation Networks</title>
-
-<link rel="stylesheet" href="demo.css">
-<script src="https://d3js.org/d3.v5.min.js" charset="utf-8"></script>
-<script src="dagre-d3.js"></script>
-
-<!-- Pull in JQuery dependencies -->
-<link rel="stylesheet" href="tipsy.css">
-<script src="https://code.jquery.com/jquery-1.9.1.min.js"></script>
-
-<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css" integrity="sha384-HSMxcRTRxnN+Bdg0JdbxYKrThecOKuH5zCYotlSAcp1+c8xmyTe9GYg1l9a69psu" crossorigin="anonymous">
-<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap-theme.min.css" integrity="sha384-6pzBo3FDv/PJ8r2KRkGHifhEocL+1X2rVCTTkUfGk7/0pbek5mMa1upzvWbrUbOZ" crossorigin="anonymous">
-<script src="https://stackpath.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js" integrity="sha384-aJ21OjlMXNL5UyIl/XNwTMqvzeRMZH2w8c5cRVpzpU8Y5bApTppSuUkhZXN0VxHd" crossorigin="anonymous"></script>
-
-<link href="https://gitcdn.github.io/bootstrap-toggle/2.2.2/css/bootstrap-toggle.min.css" rel="stylesheet">
-<script src="https://gitcdn.github.io/bootstrap-toggle/2.2.2/js/bootstrap-toggle.min.js"></script>
-
-<script src="tipsy.js"></script>
-<script src="data.js"></script>
-<script src="jsnetworkx.js"></script>
-<script src="loadData.js"></script>
-
-<style id="css">
-text {
-  font-weight: 300;
-  font-family: "Helvetica Neue", Helvetica, Arial, sans-serf;
-  font-size: 14px;
-}
-
-.node rect {
-  stroke: #333;
-  fill: #fff;
-}
-
-.node text {
-  pointer-events: none;
-}
-
-/* This styles the title of the tooltip */
-.tipsy .name {
-  font-size: 1.5em;
-  font-weight: bold;
-  color: #60b1fc;
-  margin: 0;
-}
-
-/* This styles the body of the tooltip */
-.tipsy .description {
-  font-size: 1.2em;
-}
-</style>
-</head>
-<body>
-
-<div class="container">
-  <div class="row">
-    <div class="col">
-      <h2>SciPaWiz: A Tool For Explorative Visualization Of Scientific Citation Networks</h2>
-      <hr />
-    </div>
-  </div>
-
-  <div class="row">
-    <div class="col col-lg-1">
-      <label for="author">Author:</label>
-    </div>
-    <div class="col col-lg-9">
-      <input id="author" class="form-control" />
-    </div>
-    <div class="col col-lg-2">
-      <button id="authorButton" class="btn btn-info" style="width:100%;" >
-        Fetch authors papers
-      </button>
-    </div>
-  </div>
-
-  <div class="row">
-    <div class="col col-lg-1">
-      <label for="layers">Layers:</label>
-    </div>
-    <div class="col col-lg-9">
-      <input type="range" id="layers" value="3" min="1" max="5" class="form-control" oninput="document.getElementById('layers_show').innerHTML = this.value" />
-    </div>
-    <div class="col col-lg-2">
-      <p id="layers_show">3</p>
-    </div>
-  </div>
-
-  <div class="row">
-    <div class="col col-lg-1">
-      <label for="selectPaper">Papers:</label>
-    </div>
-    <div class="col col-lg-9">
-      <select id="selectPaper" class="form-control">
-        <option></option>
-      </select>
-    </div>
-    <div class="col col-lg-2">
-      <button id="selectPaperButton" class="btn btn-success" style="width:100%;" >
-        Show Paper!
-      </button>
-    </div>
-  </div>
-
-  <div class="row">
-    <div class="col col-lg-1">
-      <span id="count"></span>/<span id="total"></span>
-    </div>
-    <div class="col col-lg-9">
-    </div>
-    <div class="col col-lg-2">
-      <button id="stopFetchButton" class="btn btn-danger" style="width:100%;" >
-        Stop Execution!
-      </button>
-    </div>
-  </div>
-  <div class="row">
-    <div class="col col-lg-10">
-      <svg width="960" height="600">
-      </svg>
-    </div>
-    <div class="col col-lg-2">
-      <h3>Chains</h3>
-      <div style="height: 500px;overflow-y: scroll;" class="form-control">
-        <div id="cliqueList"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="row">
-    <div class="col col-lg-5">
-      <h3>Graph filters</h3>
-      <div class="row">
-        <div class="col col-lg-3">
-          <label for="colors" >Colors:</label>
+      <section class="controls">
+        <div class="control-row">
+          <label for="provider">Source</label>
+          <select id="provider" class="grow"></select>
         </div>
-        <div class="col col-lg-9">
-          <input type="checkbox" id="colors" checked data-toggle="toggle" onchange="updateGraph()">
+
+        <div class="control-row">
+          <label for="author">Author</label>
+          <input id="author" class="grow" placeholder="e.g. Kasper Green Larsen" autocomplete="off" />
+          <button id="searchButton" class="btn btn-info">Search</button>
         </div>
-      </div>
-      
-      <div class="row">
-        <div class="col col-lg-3">
-          <label for="colors" >Renderer:</label>
+
+        <div class="control-row">
+          <label for="authorMatch">Match</label>
+          <select id="authorMatch" class="grow"></select>
         </div>
-        <div class="col col-lg-9">
-          <input type="radio" id="renderMode1" checked name="rate" value="0" onchange="updateGraph()" class="form-check-input">
-          <label for="renderMode1" class="form-check-label">End Heavy Render</label>
-          <input type="radio" id="renderMode2" name="rate" value="1" onchange="updateGraph()" class="form-check-input">
-          <label for="renderMode2" class="form-check-label">Top Heavy Render</label>
+
+        <div class="control-row">
+          <label for="paper">Paper</label>
+          <select id="paper" class="grow"></select>
+          <button id="expandButton" class="btn btn-primary">Build graph</button>
         </div>
-      </div>
-      
-      <div class="row">
-        <div class="col col-lg-3">
-          <label for="layers">Experimental - Chain collapsion:</label>
+
+        <div class="control-row">
+          <label for="layers">Layers</label>
+          <input type="range" id="layers" min="1" max="5" value="2" class="grow" />
+          <span id="layersShow" class="pill">2</span>
+
+          <label for="direction">Direction</label>
+          <select id="direction">
+            <option value="citers" selected>Citers (incoming)</option>
+            <option value="references">References (outgoing)</option>
+            <option value="both">Both</option>
+          </select>
         </div>
-        <div class="col col-lg-8">
-          <input type="range" id="collaps" value="0" min="0" max="50" class="form-control" onclick="collaps = this.value; updateGraph()" oninput="document.getElementById('collaps_show').innerHTML = this.value" />
+
+        <div class="control-row">
+          <span id="progress" class="muted">idle</span>
+          <span class="grow"></span>
+          <button id="stopButton" class="btn btn-danger" disabled>Stop</button>
         </div>
-        <div class="col col-lg-1">
-          <p id="collaps_show">0</p>
+      </section>
+
+      <section class="stage">
+        <div id="cy"></div>
+        <aside class="sidebar">
+          <h3>Chains</h3>
+          <div id="cliqueList" class="clique-list"></div>
+        </aside>
+      </section>
+
+      <section class="panel">
+        <div class="panel-col">
+          <h3>Display</h3>
+          <label class="inline"><input type="checkbox" id="colors" checked /> Color chains</label>
+          <label class="inline">
+            Layout
+            <select id="layout">
+              <option value="dagre" selected>Hierarchical (L→R)</option>
+              <option value="fcose">Force-directed</option>
+            </select>
+          </label>
+          <label class="inline">
+            Collapse chains
+            <input type="range" id="collapse" min="0" max="20" value="0" />
+            <span id="collapseShow" class="pill">0</span>
+          </label>
         </div>
-      </div>
+
+        <div class="panel-col">
+          <h3>History</h3>
+          <div id="history" class="history"></div>
+        </div>
+
+        <div class="panel-col">
+          <h3>Import / Export</h3>
+          <div class="btn-group">
+            <button id="exportButton" class="btn">Export JSON</button>
+            <button id="importButton" class="btn">Import JSON</button>
+            <button id="shareButton" class="btn">Copy share link</button>
+            <button id="clearCacheButton" class="btn btn-ghost">Clear cache</button>
+          </div>
+          <textarea id="dataInput" rows="3" placeholder="Paste exported JSON here, then click Import"></textarea>
+        </div>
+      </section>
+
+      <footer class="app-footer">
+        <span id="statusBar" class="muted"></span>
+      </footer>
     </div>
-    <div class="col col-lg-5">
-      <h3>History</h3>
-      <div class="col" id="history"></div>
-    </div>
-    <div class="col col-lg-2">
-      <h3>Import/Export graph</h3>
-      <input type="button" class="btn btn-primary" value="Export" id="exportButton"/>
-      <input type="button" class="btn btn-primary" value="Import" id="importButton"/><br>
-      <input class="col" class="form-control" id="dataInput" /><br><br>
-    </div>
-  </div>
-</div>
 
-<script>
-var collaps = 0  
-var cliques
-
-var rootnode = "10.1137/1.9781611973099.49"
-
-var edges = {}
-
-var ExclusionSet = new Set();
-
-var graphHistory = []
-
-var pressedKeys = {};
-window.onkeyup = function(e) { pressedKeys[e.keyCode] = false; }
-window.onkeydown = function(e) { pressedKeys[e.keyCode] = true; }
-
-// Simple function to style the tooltip for the given node.
-var styleTooltip = function(paper) {
-  return "<p class='name'>" + paper.title + "</p><p class='description'>authors: " + paper.author + "</p><p class='description'>year: " + paper.year + "</p></p><p class='description'>source: " + paper.title_source + "</p>";
-};
-
-// Create the renderer
-var render = new dagreD3.render();
-
-// Set up an SVG group so that we can translate the final graph.
-var svg = d3.select("svg"),
-    inner = svg.append("g");
-
-var authorElement = document.getElementById('author');
-var selectPaperElement = document.getElementById('selectPaper');
-var layersElement = document.getElementById('layers');
-
-var historyElement = document.getElementById('history');
-
-var authorButtonElement = document.getElementById('authorButton');
-authorButtonElement.addEventListener("click", () => GetPapersFromAuthor(authorElement.value, selectPaperElement));
-
-var selectPaperButtonElement = document.getElementById('selectPaperButton');
-selectPaperButtonElement.addEventListener("click", () => newGraph(selectPaperElement.value));
-
-var stopFetchButtonElement = document.getElementById('stopFetchButton');
-stopFetchButtonElement.addEventListener("click", () => cancelToken = true);
-
-var dataInputElement = document.getElementById('dataInput');
-
-var exportButtonElement = document.getElementById('exportButton');
-exportButtonElement.addEventListener("click", () => dataInputElement.value = JSON.stringify(data.map(node =>
-    ({
-      author: node.author,
-      citers: node.citers,
-      doi: node.doi,
-      title: node.title,
-      year: node.year,
-      title_source: node.title_source
-    })
-)));
-
-var importButtonElement = document.getElementById('importButton');
-importButtonElement.addEventListener("click", () => {data = JSON.parse(dataInputElement.value); updateGraph()});
-
-//newGraph("10.1137/1.9781611973099.49");
-
-function newGraph(id) {
-  data = [];
-  ExclusionSet = new Set();
-  cancelToken = false;
-  count = new Set();
-  countCiters = new Set();
-  total = new Set([id]);
-  document.getElementById('count').innerHTML = count.size;
-  document.getElementById('total').innerHTML = total.size;
-  LoadPaper(id, layersElement.value, infoCallback, citersCallback);
-}
-
-var dataQuery = getParameterByName("data");
-
-if (dataQuery != null) {
-    var importClient = new XMLHttpRequest();
-    importClient.onreadystatechange = function() {
-        if (this.readyState == 4 && this.status == 200) {
-            data = JSON.parse(importClient.responseText);
-            updateGraph();
-        }
-    };
-    importClient.open("GET", dataQuery, true);
-    importClient.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
-    importClient.send();
-}
-
-updateGraph();
-
-function updateGraph() {
-  edges = {}
-  g = nxclean()
-  render(inner, g);
-  inner.selectAll("g.node")
-    .attr("title", function(v) { return styleTooltip(g.node(v)) })
-    .each(function(v) { $(this).tipsy({ gravity: "w", opacity: 1, html: true }); })
-    .on("click", (id) => extendGraph(id))
-  inner.selectAll("g.edgePath").each((e) => {
-    var id = queryId("edge"+e.v+e.w);
-    var colors = edges[id];
-    if (colors != undefined) {
-      inner.select("#"+id).on("mouseover", () => {inner.selectAll(".glower").remove(); colors.forEach(color => highlightClique(color));})
-      inner.select("#"+id).on("mouseout", () => inner.selectAll(".glower").remove())
-    }
-  })
-  
-  Object.keys(edges).filter(e => edges[e].length > 1).forEach(e => {
-    var d = inner.select("#" + e + " > path")._groups[0][0].getAttribute("d")
-    inner.select("#" + e).html("");
-    for (i = 0; i<edges[e].length; i++) {
-      var color = edges[e][i];
-      if (!document.getElementById("colors").checked) {
-        color = "black";
-      }
-      inner.select("#" + e).append("path")
-        .attr("style", `stroke:${color};stroke-width:${edges[e].length*4};stroke-dasharray:4, ${4*(edges[e].length-1)};stroke-dashoffset:${4*i}`)
-        .attr("d", d)
-        .attr("class", "path")
-    }
-  });
-}
-
-function moveToClique(color) {
-  clique = cliques.filter(clique => clique.color == color)[0];
-
-  var max_x = -100000000
-  var min_x = 100000000
-  var max_y = -100000000
-  var min_y = 100000000
-  clique.nodes.forEach(node => {
-    var domElement = inner.select("#node" + queryId(node))._groups[0][0] 
-    var x = domElement.transform.baseVal[0].matrix.e;
-    var y = domElement.transform.baseVal[0].matrix.f;
-    max_x = Math.max(x, max_x);
-    max_y = Math.max(y, max_y);
-    min_x = Math.min(x, min_x);
-    min_y = Math.min(y, min_y);
-  })
-
-  var midX = (max_x + min_x) / 2,
-	    midY = (max_y + min_y) / 2;
-
-
-  var scale = (0.8/(Math.max((max_x-min_x) / 900, (max_y-min_y) / 600)));
-  var translate = [900 / 2 - scale * midX, 600 / 2 - scale * midY];
-
-  svg.transition().duration(1000).call(zoom.transform, d3.zoomIdentity
-  .translate(translate[0], translate[1])
-  .scale(scale)
-  );
-
-}
-
-function highlightClique(color) {
-  clique = cliques.filter(clique => clique.color == color)[0];
-
-  clique.edges.forEach(e => { 
-    var d = inner.select("#" + e + " > path")._groups[0][0].getAttribute("d")
-    inner.select("#" + e).append("path")
-        .attr("style", `stroke:${color};stroke-width:${edges[e].length*4*3};opacity:0.5`)
-        .attr("d", d)
-        .attr("class", "path glower")
-  });
-}
-
-function infoCallback(doi, title, title_source, author, year) {
-  if (!data.map(p => p.doi).includes(doi)) {
-    data.push({doi: doi, title: title, title_source: title_source, citers: null, author: author, year: year})
-  } else {
-    data.filter(p => p.doi == doi)[0].title = title
-    data.filter(p => p.doi == doi)[0].title_source = title_source
-    data.filter(p => p.doi == doi)[0].author = author
-    data.filter(p => p.doi == doi)[0].year = year
-  }
-  updateGraph();
-}
-
-function citersCallback(doi, citers) {
-  if (!data.map(p => p.doi).includes(doi)) {
-    data.push({doi: doi, citers: citers})
-  } else {
-    data.filter(p => p.doi == doi)[0].citers = citers
-  }
-  updateGraph();
-}
-
-function extendGraph(doi) {
-  var i = graphHistory.length
-  var edgesCopy = Object.assign({}, data);
-  graphHistory.push({data: [...data], ExclusionSet: new Set(ExclusionSet), edges: {...edges}, count: new Set(count), countCiters: new Set(countCiters), total: new Set(total), text: "♥", i: i});
-  renderHistory();
-  if (pressedKeys[17]) {
-    newGraph(doi);
-  } else {
-    cancelToken = false;
-    ExclusionSet.add(doi)
-    document.getElementById('total').innerHTML = total.size;
-    LoadPaper(doi, 2, infoCallback, citersCallback);
-    updateGraph();
-  }
-}
-
-function goBackInTime(i) {
-  console.log(graphHistory[i])
-  console.log(graphHistory[i].data)
-  data = graphHistory[i].data;
-  console.log(data)
-  ExclusionSet = graphHistory[i].ExclusionSet
-  edges = graphHistory[i].edges
-  count = graphHistory[i].count
-  countCiters = graphHistory[i].countCiters
-  total = graphHistory[i].total
-  document.getElementById('count').innerHTML = count.size;
-  document.getElementById('total').innerHTML = total.size;
-  graphHistory = graphHistory.slice(0, i);
-  renderHistory();
-  updateGraph();
-}
-
-function renderHistory() {
-  historyElement.innerHTML = "";
-  graphHistory.forEach(snap => {
-    var snapshotElement = document.createElement('span');
-    snapshotElement.className = "badge badge-primary";
-    snapshotElement.innerHTML = snap.text;
-    snapshotElement.onclick = () => goBackInTime(snap.i);
-    historyElement.appendChild(snapshotElement);
-  });
-}
-
-// Set up zoom support
-var zoom = d3.zoom()
-    .on("zoom", function() {
-      inner.attr("transform", d3.event.transform);
-    });
-svg.call(zoom);
-
-/*returns a graph constructed directly from the datafile*/
-function load_graph() {
-  var g = new dagreD3.graphlib.Graph().setGraph({});
-
-  g.graph().rankdir = 'LR';
-  g.graph().align = 'DR';
-  //g.graph().ranker = 'tight-tree'
-
-  var cleanedData = data.filter(paper => paper.citers != null)
-  
-  var states = cleanedData.reduce((dict, paper) => {dict[paper.doi] = paper; return dict}, {})
-
-  // Add states to the graph, set labels, and style
-  Object.keys(states).forEach(function(state) {
-    var value = states[state];
-    g.setNode(state, value);
-  });
-
-  var options = {};
-  cleanedData.filter(paper => paper.citers != null).forEach(paper => {
-      paper.citers.filter(c => states[c] != null).forEach(citer => {
-          g.setEdge(paper.doi, citer, {curve: d3.curveBasis});
-      });
-  });
-
-  return g
-}
-
-/*Returns a cleaned graph based on cliques*/
-function nxclean() {
-  //Load dagre graph
-  var gd = load_graph()
-
-
-  //Make networkx version of the graph
-  gx = new jsnx.DiGraph();
-
-  var cleanedData = data.filter(paper => paper.citers != null)
-  
-  var states = cleanedData.reduce((dict, paper) => {dict[paper.doi] = paper; dict[paper.doi].citerCount = (paper.citers != null ? paper.citers.length : 0); return dict}, {})
-
-  var max = 0;
-  for (let p of cleanedData) {
-    if (p.citers == null) {
-      continue;
-    }
-    max = Math.max(max, p.citers.length);
-  }
-
-  //Add nodes directly from the data
-  Object.keys(states).forEach(function(state) {
-    gx.addNode(state);
-  });
-
-  //Add only edges from the cleaned dagre graph
-  gd.edges().forEach(edge =>{
-    //if (edge['v'] != edge['w']) {
-      gx.addEdge(edge['v'],edge['w'])
-    //}
-  });
-
-  //Rank nodes for later MUST BE DONE HERE DO NOT MOVE DOWN
-  var adjecencyMap = makeAdjecencyMap(gx)
-
-  gx.nodes().forEach( node => findCycles(adjecencyMap, node, {}, node, gx))
-  //var cycles = findCycles(adjecencyMap, source_node, visited, source_node)
-  //console.log(visited)
-  var sortOrder = jsnx.topologicalSort(gx)
-  
-  //Add reverse edges
-  gx.edges().forEach(edge =>
-    gx.addEdge(edge[1],edge[0])
-  )
-
-  var cliques_iterator = jsnx.findCliques(gx)
-
-  cliques = Array.from(cliques_iterator)
-
-  //Sort cliques according to topology order
-  const sorter = (a, b) => {
-    ia = sortOrder.indexOf(a);
-    ib = sortOrder.indexOf(b); 
-    if ( ia < ib ) {
-        return -1;
-    };
-    if (ia > ib ) {
-      return 1;
-    }
-    return 0;
-  };
-
-  cliques.forEach(clique => {clique.sort(sorter)})
-
-  
-
-  //Collapse cliques based on collaption factor
-  //var collaps = 0
-  var collapsed_cliques;
-  if (collaps > 0) {
-    long_cliques = cliques.filter(e => e.length > 2)
-    collapsed_cliques = new Array(long_cliques.length);
-    //console.log(collapsed_cliques[2])
-    for(var i = 0; i < long_cliques.length; i++) {
-      if (long_cliques[i] == []) {
-        continue
-      }
-      var collapsing = false
-      for(var j = i+1; j < long_cliques.length; j++)  {
-        if (long_cliques[j] == []) {
-          continue
-        }
-        var union = long_cliques[i].filter(e => long_cliques[j].includes(e)).length
-        if (union != 0 && long_cliques[i].length-union <= collaps && long_cliques[j].length-union <= collaps) {
-          collapsing = true
-          test = long_cliques[i].concat(long_cliques[j])
-          combine = new Set(test)
-          collapsed_cliques[i] = Array.from(combine)
-          long_cliques[i] = collapsed_cliques[i]
-          long_cliques[j] = [] 
-        }
-      }
-      if (!collapsing) { 
-        collapsed_cliques[i] = long_cliques[i] 
-      }
-    }
-    
-    //console.log(collapsed_cliques.filter(x => x != empty).length)
-    collapsed_cliques = collapsed_cliques.filter(e => e.length != 0)
-    cliques = collapsed_cliques.concat(cliques.filter(e => e.length == 2))
-    
-    cliques.forEach(clique => {clique.sort(sorter)})
-  }
-
-
-  cliques = cliques.map(clique => {return {nodes: clique, edges: []}})
-
-  //Make the actual graph based on cliques
-  var g = new dagreD3.graphlib.Graph({compound:true}).setGraph({});
-
-  g.graph().rankdir = 'LR';
-
-  cliques.filter(c => c.nodes.length == 2).forEach(clique => {
-    var restOfNodes = cliques.filter(c => c != clique).map(c => c.nodes).flat();
-    if(!restOfNodes.includes(clique.nodes[1]) && !ExclusionSet.has(clique.nodes[0])) {
-      cliques.splice(cliques.indexOf(clique),1)
-      delete states[clique.nodes[1]];
-    }
-  });
-
-  for (i = 0; i<cliques.length; i++) {
-    cliques[i].color = rainbow(cliques.length-1, i)
-  }
-  
-  //Node can be loaded from data
-  //_nodes = shuffle(Object.keys(states))
-  Object.keys(states).forEach(state => {
-    var value = states[state];
-    value.label = value.citerCount.toString();
-    value.rx = value.ry = 5;
-    value.shape = "circle";
-    value.id = "node" + queryId(value.doi);
-    value.style = `fill:lightgrey; stroke:black; stroke-width:2; r:${60*value.citerCount/max+20};`;
-    g.setNode(state, value);
-  });
-
-  //Sort edges for rendering order and add them
-  edgeList = []
-  edgeListDash = []
-  cliques.forEach(clique => {
-    var color = clique.color;
-    clique.nodes.forEach((node, index) => {   
-      if ((index + 1) != (clique.nodes.length)) {
-        
-        var id = queryId("edge"+(node+clique.nodes[index+1]));
-        clique.edges.push(id);
-        if (edges.hasOwnProperty(id)) {
-          edges[id].push(color);
-        } else {
-          edges[id] = [color];
-        }
-        var strokeColor = color
-        if (!document.getElementById("colors").checked) {
-          strokeColor = "black"
-        }
-        if (clique.nodes.length == 2) {
-          edgeListDash.push([node, clique.nodes[index+1], {curve: d3.curveBasis, weight: 1, style: "stroke-dasharray: 5, 5;", arrowheadStyle: `fill: transparent; stroke: transparent`}])
-        } else {
-          edgeList.push([node, clique.nodes[index+1], {curve: d3.curveBasis, weight: 2, id:id, style: `stroke: ${strokeColor}; stroke-width: 5;`, arrowheadStyle: `fill: transparent; stroke: transparent`}])
-        }
-      }
-    })
-  })
-  const edgeSorter = (a, b) => {
-    ia_first = sortOrder.indexOf(a[0]);
-    ib_first = sortOrder.indexOf(b[0]); 
-    if ( ia_first < ib_first ) {
-        return -1;
-    };
-    if (ia_first > ib_first ) {
-      return 1;
-    }
-    //if first nodes are equal
-    ia_sec = sortOrder.indexOf(a[1]);
-    ib_sec = sortOrder.indexOf(b[1]); 
-    if ( ia_sec < ib_sec ) {
-        return -1;
-    };
-    if (ia_sec > ib_sec ) {
-      return 1;
-    }
-    return 0;
-  };
-
-  //edgeList = g.edges().map(x => [x["w"],x["v"],{"label":""}])
-  edgeList = edgeList.sort(edgeSorter)
-  edgeListDash = edgeListDash.sort(edgeSorter)
-
-  edgeList.forEach((edge, i) => {
-    var weight;
-      if (document.getElementById("renderMode1").checked) {
-        weight = i;
-      }
-      if (document.getElementById("renderMode2").checked) {
-        weight = edgeList.length-i;
-      } 
-    var id = queryId("edge"+(edge[0]+edge[1]));
-    edge[2].weight = weight
-    g.setEdge(edge[0], edge[1], edge[2])   
-  })
-  edgeListDash.forEach((edge, i) => {
-    var id = queryId("edge"+(edge[0]+edge[1]));
-    g.setEdge(edge[0], edge[1], edge[2])   
-  })
-
-
-
-  // Generate sidebar
-  var cliqueList = document.getElementById('cliqueList');
-  cliqueList.innerHTML = "";
-
-  cliques.filter(c => c.nodes.length != 2).sort(compareLength).reverse().forEach(clique => {
-    var elem = document.createElement("div");
-
-    // Identify keywords
-    var keyWords = {}
-    clique.nodes.forEach(node => {
-      remove = ["!", "$", "&", "(", ")", "/", "\n", ",", ":", ".", "'", "´", "|", "`", "[", "]", "*", "^"]
-      sanitized_title = states[node].title != undefined ? remove.reduce((t, sym) => t.replaceAll(sym, ""), states[node].title.toLowerCase()) : ""
-      words_in_title = sanitized_title.split(" ")
-
-      ignored_words = ["for", "to", "from", "and", "or", "in", "the", "a", "an", "of", "with", "where", "on", "by", "as", "what", "who", "which", "whom", "when", "", " "];
-
-      sanitized_words_in_title = words_in_title.filter(w => !ignored_words.includes(w));
-      sanitized_words_in_title.forEach(word => keyWords[word] != undefined && word.length > 2 ? keyWords[word]++: keyWords[word] = 1)
-    })
-    function sortKeyValues(a, b) {
-      if ( keyWords[a] > keyWords[b] ){
-        return -1;
-      }
-      if ( keyWords[a] < keyWords[b] ){
-        return 1;
-      }
-      return 0;
-    }
-    var importWords = Object.keys(keyWords).sort(sortKeyValues)
-
-    // Identify start and end years for clique
-    var sortedYears = clique.nodes.map(node => states[node].year).filter(y => y != undefined).sort();
-    var earliestYear = sortedYears[0]
-    var latestYear = sortedYears[sortedYears.length -1]
-
-    // Identify all authors for clique
-    var authors = {}
-    clique.nodes.forEach(node => {
-      authors_for_paper = states[node].author != undefined ? states[node].author.split(";") : []
-      authors_for_paper.forEach(author => authors[author] != undefined ? authors[author]++ : authors[author] = 1)
-    });
-
-    var importantAuthors = Object.keys(authors).map(function(key) {
-      return [key, authors[key]];
-    });
-    importantAuthors.sort(function(first, second) {
-      return second[1] - first[1];
-    });
-    
-    // Generate innerHtml
-    elem.innerHTML = `
-    <div style="display:inline-block;height:15px;min-width:15px;padding-right:4px;padding-left:4px;padding-top:0px;line-height:1.2;color:white;background-color:${clique.color}">${clique.nodes.length}</div>
-    <b> ${importWords[0]}, ${importWords[1]}, ${importWords[2]}</b><br />
-    ${earliestYear} - ${latestYear}<br />` +
-    (importantAuthors[0] != undefined ? `${importantAuthors[0][0]} (${importantAuthors[0][1]}/${clique.nodes.length})` : "") +
-    `<hr style="margin:5px;" />`;
-    elem.addEventListener("click", () => {inner.selectAll(".glower").remove(); highlightClique(clique.color); moveToClique(clique.color);});
-    cliqueList.appendChild(elem);
-  });
-
-  function compareLength(a, b) {
-    if ( a.nodes.length < b.nodes.length ){
-      return -1;
-    }
-    if ( a.nodes.length > b.nodes.length ){
-      return 1;
-    }
-    return 0;
-  }
-
-  function haveOverlap(a, b) {
-    return a.some( node => {
-      b.indexOf(node) != -1
-    })
-  } 
-
-/*cliques.filter(c => c.nodes.length != 2).forEach((clique, i ) => { 
-  g.setNode('Group'+i, {style: `stroke: transparent; fill: white`})
-  clique.nodes.forEach(node => {
-    g.setParent(node, 'Group'+i)
-  });
-});*/
-
-  g.setNode("mainGroup", {style: `stroke: transparent; fill: white`})
-  if (cliques.length != 0) {
-    cliques.sort(compareLength).reverse()[0].nodes.forEach((node, index) => {
-      g.setParent(node, "mainGroup");
-    });
-  }
- var yearGroups = Object.values(states).reduce((groups, node) => {(groups[node.year] = groups[node.year] || []).push(node); return groups}, {})
-
-  delete yearGroups[undefined]
-
-  function compareCiterLengths(a, b) {
-    if ( a.citerCount > b.citerCount ){
-      return -1;
-    }
-    if ( a.citerCount < b.citerCount ){
-      return 1;
-    }
-    return 0;
-  }
-
-
-  var years = Object.keys(yearGroups).filter(year => year != "" && year != null && year != undefined);
-  for (i = 0; i<years.length-1; i++) {
-    var group = yearGroups[years[i]].map(node => node.doi)
-    var nextGroupRep = yearGroups[years[i+1]].sort(compareCiterLengths)[0].doi
-    group.forEach(node => {
-      var id = queryId("edge"+(node+nextGroupRep));
-      if (!edges.hasOwnProperty(id)) {
-        g.setEdge(node, nextGroupRep, {style: `stroke: transparent; stroke-width: 1;`, arrowheadStyle: `fill: transparent; stroke: transparent`})
-      }
-    })
-  }
-  
-  
-  g.graph().ranksep = 70
-  g.graph().edgesep = 30
-  g.graph().ranker = "tight-tree"
-
-  return g
-
-}
-
-function queryId(id) {
-  return id.replaceAll(".", "").replaceAll("/","").replaceAll("(", "").replaceAll(")", "")
-}
-
-function getRandomColor() {
-  var letters = '0123456789ABCDEF';
-  var color = '#';
-  for (var i = 0; i < 6; i++) {
-    color += letters[Math.floor(Math.random() * 16)];
-  }
-  return color;
-}
-
-function rainbow(numOfSteps, step) {
-    // This function generates vibrant, "evenly spaced" colours (i.e. no clustering). This is ideal for creating easily distinguishable vibrant markers in Google Maps and other apps.
-    // Adam Cole, 2011-Sept-14
-    // HSV to RBG adapted from: http://mjijackson.com/2008/02/rgb-to-hsl-and-rgb-to-hsv-color-model-conversion-algorithms-in-javascript
-    var r, g, b;
-    var h = step / numOfSteps;
-    var i = ~~(h * 6);
-    var f = h * 6 - i;
-    var q = 1 - f;
-    switch(i % 6){
-        case 0: r = 1; g = f; b = 0; break;
-        case 1: r = q; g = 1; b = 0; break;
-        case 2: r = 0; g = 1; b = f; break;
-        case 3: r = 0; g = q; b = 1; break;
-        case 4: r = f; g = 0; b = 1; break;
-        case 5: r = 1; g = 0; b = q; break;
-    }
-    var c = "#" + ("00" + (~ ~(r * 255)).toString(16)).slice(-2) + ("00" + (~ ~(g * 255)).toString(16)).slice(-2) + ("00" + (~ ~(b * 255)).toString(16)).slice(-2);
-    return (c);
-}
-
-function makeAdjecencyMap(gx) {
-  var adj = new Map()
-  gx.nodes().forEach(node => {
-    adj[node] = jsnx.neighbors(gx, node)
-  })
-  return adj
-}
-
-
-function findCycles(adj, node, visited, start, graph) {
-  if (visited[node]) {
-    if (node == start){
-      return true
-    } 
-    return false; 
-  } 
-  visited[node]=true;      
-  adj[node].forEach(child => {
-    if (findCycles(adj,child,visited, start, graph)){
-      gx.edges().some(e => {
-        if (e[0] == node && e[1] == child) {
-          graph.removeEdge(e[0],e[1])
-          return true
-        }
-        if (e[1] == node && e[0] == child) {
-          graph.removeEdge(e[1],e[0])
-          return true
-        } 
-        return false  
-      })
-    }
-  })     
-  visited[node]=false;
-}
-
-
-
-// function to shuffle list
-function shuffle(a) {
-    var j, x, i;
-    for (i = a.length; i; i -= 1) {
-        j = Math.floor(Math.random() * i);
-        x = a[i - 1];
-        a[i - 1] = a[j];
-        a[j] = x;
-    }
-    return a;
-}
-
-// Center the graph
-var initialScale = 1;
-svg.call(zoom.transform, d3.zoomIdentity.translate((svg.attr("width") - 900) / 2, 100).scale(initialScale));
-
-</script>
-</body>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>

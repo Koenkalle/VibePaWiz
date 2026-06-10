@@ -1,10 +1,20 @@
+# Dependencies & build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Vite / test caches
+.vite/
+coverage/
+
+# Editor
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
 *.code-workspace
-.vscode/
-
-# Local History for Visual Studio Code
 .history/
+
+# OS
+.DS_Store
