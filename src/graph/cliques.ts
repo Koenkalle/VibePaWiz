@@ -210,14 +210,24 @@ export function detectCliques(
   cliqueNodes.forEach((c) => c.sort(byOrder));
   cliqueNodes.sort((a, b) => b.length - a.length);
 
-  return cliqueNodes.map((nodeIds, i): Clique => {
+  // Only chains (size ≥ 3) are colored. Spread hues over the number of chains so
+  // few chains are maximally distinct; assign by topological position so that —
+  // once there are many — chains close in the citation timeline get similar hues.
+  const minOrder = (c: string[]) => Math.min(...c.map((id) => orderIndex.get(id) ?? 0));
+  const chains = cliqueNodes.filter((c) => c.length >= 3);
+  const colorOf = new Map<string[], string>();
+  [...chains]
+    .sort((a, b) => minOrder(a) - minOrder(b))
+    .forEach((c, rank) => colorOf.set(c, rainbow(chains.length, rank)));
+
+  return cliqueNodes.map((nodeIds): Clique => {
     const years = nodeIds
       .map((id) => meta(id)?.year)
       .filter((y): y is number => typeof y === 'number')
       .sort((a, b) => a - b);
     const clique: Clique = {
       nodes: nodeIds,
-      color: rainbow(cliqueNodes.length, i),
+      color: colorOf.get(nodeIds) ?? '#9aa3ab',
       keywords: topKeywords(nodeIds, meta).slice(0, 3),
       topAuthors: topAuthors(nodeIds, meta).slice(0, 3),
     };

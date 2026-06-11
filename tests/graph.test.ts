@@ -47,6 +47,17 @@ describe('GraphModel', () => {
     expect(deg.get('B')).toBe(1);
   });
 
+  it('computes citer count as in-degree (papers citing a node)', () => {
+    const m = new GraphModel();
+    ['A', 'B', 'C'].forEach((id) => m.addNode(meta(id)));
+    m.addEdge('B', 'A'); // B cites A
+    m.addEdge('C', 'A'); // C cites A
+    const citers = m.inDegrees();
+    expect(citers.get('A')).toBe(2); // A has two citers
+    expect(citers.get('B')).toBe(0); // B is a leaf citer
+    expect(citers.get('C')).toBe(0);
+  });
+
   it('round-trips through serialize/load', () => {
     const m = new GraphModel();
     m.addNode(meta('A'));
@@ -58,6 +69,8 @@ describe('GraphModel', () => {
       colors: true,
       layout: 'dagre',
       collapse: 0,
+      yearOrder: true,
+      simplifyChains: true,
     });
     const m2 = new GraphModel();
     m2.load(serialized);

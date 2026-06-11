@@ -2,6 +2,7 @@ import './style.css';
 import { detectCliques } from './graph/cliques';
 import { expand } from './graph/expand';
 import { GraphModel } from './graph/model';
+import { visibleNodes } from './graph/visibility';
 import { DEFAULT_PROVIDER_ID, getProvider, providers } from './providers/registry';
 import type { CitationProvider } from './providers/types';
 import { LocalCache, withCache } from './state';
@@ -32,6 +33,8 @@ const directionSel = $<HTMLSelectElement>('direction');
 const progressEl = $<HTMLElement>('progress');
 const stopButton = $<HTMLButtonElement>('stopButton');
 const colorsInput = $<HTMLInputElement>('colors');
+const yearOrderInput = $<HTMLInputElement>('yearOrder');
+const simplifyInput = $<HTMLInputElement>('simplifyChains');
 const layoutSel = $<HTMLSelectElement>('layout');
 const collapseInput = $<HTMLInputElement>('collapse');
 const collapseShow = $<HTMLElement>('collapseShow');
@@ -51,8 +54,14 @@ const history = new History();
 let providerId = DEFAULT_PROVIDER_ID;
 let provider: CitationProvider = withCache(getProvider(providerId), cache);
 let seedId: string | null = null;
+/** Nodes the user explicitly clicked to expand (controls leaf visibility). */
+let expanded = new Set<string>();
 let controller: AbortController | null = null;
 let rerenderTimer: number | undefined;
+let lastRenderAt = 0;
+let pendingFit = false;
+/** Min gap between live re-renders while loading, so big graphs don't thrash. */
+const RENDER_THROTTLE_MS = 1500;
 
 const view = new GraphView($('cy'), { onExpandNode: extendFrom, onRerootNode: reroot });
 
@@ -64,6 +73,8 @@ function readSettings(): Settings {
     colors: colorsInput.checked,
     layout: layoutSel.value as LayoutName,
     collapse: Number(collapseInput.value),
+    yearOrder: yearOrderInput.checked,
+    simplifyChains: simplifyInput.checked,
   };
 }
 
@@ -75,6 +86,14 @@ function writeSettings(s: Settings): void {
   layoutSel.value = s.layout;
   collapseInput.value = String(s.collapse);
   collapseShow.textContent = String(s.collapse);
+  yearOrderInput.checked = s.yearOrder ?? true;
+  simplifyInput.checked = s.simplifyChains ?? true;
+  updateLayoutControls();
+}
+
+/** Year ordering only applies to the layered (hierarchical) layouts. */
+function updateLayoutControls(): void {
+  yearOrderInput.disabled = layoutSel.value === 'fcose';
 }
 
 function setStatus(msg: string): void {
@@ -91,7 +110,8 @@ function setRunning(running: boolean): void {
 }
 
 // --- Rendering ---
-function rerender(): void {
+// `fit` re-centers the viewport; false keeps the user's current pan/zoom.
+function rerender(fit: boolean): void {
   const settings = readSettings();
   const nodeIds = model.getNodes().map((n) => n.id);
   const cliques: Clique[] = detectCliques(
@@ -100,33 +120,46 @@ function rerender(): void {
     (id) => model.getNode(id),
     settings.collapse,
   );
-  view.render(model, cliques, settings);
-  renderSidebar(
-    cliqueListEl,
-    cliques,
-    (i) => view.highlightClique(i),
-    () => view.clearHighlight(),
-  );
+  const visible = visibleNodes(model, cliques, expanded, seedId);
+  view.render(model, cliques, settings, visible, fit, seedId);
+  renderSidebar(cliqueListEl, cliques, {
+    onHover: (i) => view.highlightChains([i], false),
+    onSelect: (i) => view.highlightChains([i], true),
+    onClear: () => view.clearHighlight(),
+  });
 }
 
-function scheduleRerender(): void {
-  if (rerenderTimer != null) return;
-  rerenderTimer = window.setTimeout(() => {
-    rerenderTimer = undefined;
-    rerender();
-  }, 500);
-}
-
-function flushRerender(): void {
+function doRender(): void {
   if (rerenderTimer != null) {
     clearTimeout(rerenderTimer);
     rerenderTimer = undefined;
   }
-  rerender();
+  lastRenderAt = Date.now();
+  const fit = pendingFit;
+  pendingFit = false;
+  rerender(fit);
+}
+
+/**
+ * Throttle live re-renders during loading: render immediately if enough time has
+ * passed since the last one, otherwise batch (many nodes load before one render).
+ * `fit` requests sticky so a fit isn't lost while batching.
+ */
+function scheduleRerender(fit: boolean): void {
+  pendingFit = pendingFit || fit;
+  if (rerenderTimer != null) return;
+  const elapsed = Date.now() - lastRenderAt;
+  if (elapsed >= RENDER_THROTTLE_MS) doRender();
+  else rerenderTimer = window.setTimeout(doRender, RENDER_THROTTLE_MS - elapsed);
+}
+
+function flushRerender(fit: boolean): void {
+  pendingFit = pendingFit || fit;
+  doRender();
 }
 
 // --- Expansion flows ---
-async function runExpansion(id: string, layers: number): Promise<void> {
+async function runExpansion(id: string, layers: number, fit: boolean): Promise<void> {
   controller?.abort();
   controller = new AbortController();
   const mine = controller;
@@ -140,7 +173,7 @@ async function runExpansion(id: string, layers: number): Promise<void> {
       direction: readSettings().direction,
       signal: mine.signal,
       onProgress: (p) => setProgress(p.loaded, p.total),
-      onUpdate: scheduleRerender,
+      onUpdate: () => scheduleRerender(fit),
     });
     setStatus(`Done — ${model.nodeCount()} papers, ${model.getEdges().length} citations.`);
   } catch (err) {
@@ -150,34 +183,51 @@ async function runExpansion(id: string, layers: number): Promise<void> {
       controller = null;
       setRunning(false);
     }
-    flushRerender();
+    flushRerender(fit);
   }
 }
 
 async function newGraph(id: string): Promise<void> {
   seedId = id;
+  expanded = seedExpansionSet(id);
   model.clear();
   history.clear();
   renderHistory();
-  await runExpansion(id, readSettings().layers);
+  view.resetViewportTracking(); // an explicit Build is allowed to re-fit
+  await runExpansion(id, readSettings().layers, true);
+}
+
+/**
+ * Whether to treat the seed as already-expanded for visibility. In references
+ * mode the seed's references are the point (and low-volume), so show them even
+ * as degree-1 leaves. In citers mode keep the declutter — a paper can have huge
+ * numbers of citers, and showing every non-chained one from the root is noise.
+ */
+function seedExpansionSet(id: string): Set<string> {
+  return readSettings().direction === 'references' ? new Set([id]) : new Set();
 }
 
 async function extendFrom(id: string): Promise<void> {
   snapshot();
-  await runExpansion(id, 2);
+  // Mark this node as explicitly expanded so its direct citers become visible.
+  expanded.add(id);
+  // Keep the viewport where it is when expanding by click.
+  await runExpansion(id, 2, false);
 }
 
 async function reroot(id: string): Promise<void> {
   snapshot();
   seedId = id;
+  expanded = seedExpansionSet(id);
   model.clear();
-  await runExpansion(id, readSettings().layers);
+  view.resetViewportTracking();
+  await runExpansion(id, readSettings().layers, true);
 }
 
 // --- History ---
 function snapshot(): void {
   if (model.nodeCount() === 0) return;
-  history.push(model.serialize(providerId, seedId, readSettings()));
+  history.push(model.serialize(providerId, seedId, readSettings(), [...expanded]));
   renderHistory();
 }
 
@@ -236,10 +286,14 @@ async function loadWorks(authorId: string): Promise<void> {
   paperSel.innerHTML = '';
   try {
     const works = await provider.worksByAuthor(authorId);
+    // Newest first; papers without a year sort to the end.
+    works.sort((a, b) => (b.year ?? -Infinity) - (a.year ?? -Infinity));
     for (const w of works) {
       const opt = document.createElement('option');
       opt.value = w.id;
-      opt.textContent = `${w.title}${w.year ? ` (${w.year})` : ''}`;
+      const year = w.year ? ` (${w.year})` : '';
+      const cites = w.citedByCount != null ? ` · ${w.citedByCount} citations` : '';
+      opt.textContent = `${w.title}${year}${cites}`;
       paperSel.appendChild(opt);
     }
     setStatus(`${works.length} papers. Choose one and click "Build graph".`);
@@ -254,13 +308,15 @@ function applyGraph(graph: SerializedGraph): void {
   providerSel.value = providerId;
   writeSettings(graph.settings);
   seedId = graph.seedId;
+  expanded = new Set(graph.expanded ?? []);
   model.load(graph);
-  flushRerender();
+  view.resetViewportTracking();
+  flushRerender(true);
   setStatus(`Loaded ${graph.nodes.length} papers.`);
 }
 
 function currentSerialized(): SerializedGraph {
-  return model.serialize(providerId, seedId, readSettings());
+  return model.serialize(providerId, seedId, readSettings(), [...expanded]);
 }
 
 async function loadFromUrl(): Promise<void> {
@@ -294,10 +350,17 @@ function bindEvents(): void {
   layersInput.addEventListener('input', () => (layersShow.textContent = layersInput.value));
   collapseInput.addEventListener('input', () => {
     collapseShow.textContent = collapseInput.value;
-    flushRerender();
+    flushRerender(false);
   });
-  colorsInput.addEventListener('change', flushRerender);
-  layoutSel.addEventListener('change', flushRerender);
+  // Display toggles keep the current viewport; switching layout re-fits.
+  colorsInput.addEventListener('change', () => flushRerender(false));
+  yearOrderInput.addEventListener('change', () => flushRerender(false));
+  simplifyInput.addEventListener('change', () => flushRerender(false));
+  layoutSel.addEventListener('change', () => {
+    updateLayoutControls();
+    view.resetViewportTracking();
+    flushRerender(true);
+  });
   stopButton.addEventListener('click', () => controller?.abort());
 
   exportButton.addEventListener('click', () => {
@@ -329,5 +392,6 @@ function bindEvents(): void {
 fillProviders();
 renderHistory();
 bindEvents();
+updateLayoutControls();
 setStatus('Ready. Search an author to begin.');
 void loadFromUrl();

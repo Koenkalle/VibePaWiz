@@ -6,12 +6,21 @@ const graph: SerializedGraph = {
   version: 1,
   providerId: 'openalex',
   seedId: 'W1',
-  settings: { layers: 2, direction: 'citers', colors: true, layout: 'dagre', collapse: 0 },
+  settings: {
+    layers: 2,
+    direction: 'citers',
+    colors: true,
+    layout: 'dagre',
+    collapse: 0,
+    yearOrder: true,
+    simplifyChains: true,
+  },
   nodes: [
     { id: 'W1', title: 'Seed', authors: ['A'] },
     { id: 'W2', title: 'Citer', authors: ['B'], year: 2020 },
   ],
   edges: [{ source: 'W2', target: 'W1' }],
+  expanded: ['W1'],
 };
 
 describe('import / export', () => {

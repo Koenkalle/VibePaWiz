@@ -52,7 +52,9 @@ adapter (which shoulders the scraping/ToS) could be added later as another
 ## Tech stack
 
 [Vite](https://vite.dev) · TypeScript (strict) · [Cytoscape.js](https://js.cytoscape.org)
-(`cytoscape-dagre` hierarchical layout + `cytoscape-fcose` force layout) ·
+(Sugiyama-style hierarchical layout via [`@dagrejs/dagre`](https://github.com/dagrejs/dagre) run
+directly, with edges drawn as smooth curves routed through dagre's layered bend points;
+[`cytoscape-fcose`](https://github.com/iVis-at-Bilkent/cytoscape.js-fcose) for the force layout) ·
 [Vitest](https://vitest.dev). No jQuery, Bootstrap, dagre-d3 or jsnetworkx.
 
 ```

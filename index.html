@@ -20,7 +20,12 @@
 
         <div class="control-row">
           <label for="author">Author</label>
-          <input id="author" class="grow" placeholder="e.g. Kasper Green Larsen" autocomplete="off" />
+          <input
+            id="author"
+            class="grow"
+            placeholder="e.g. Kasper Green Larsen"
+            autocomplete="off"
+          />
           <button id="searchButton" class="btn btn-info">Search</button>
         </div>
 
@@ -67,10 +72,18 @@
         <div class="panel-col">
           <h3>Display</h3>
           <label class="inline"><input type="checkbox" id="colors" checked /> Color chains</label>
+          <label class="inline"
+            ><input type="checkbox" id="yearOrder" checked /> Year order (left→right)</label
+          >
+          <label class="inline"
+            ><input type="checkbox" id="simplifyChains" checked /> Simplify chains (hide redundant
+            edges)</label
+          >
           <label class="inline">
             Layout
             <select id="layout">
-              <option value="dagre" selected>Hierarchical (L→R)</option>
+              <option value="dagre-compact" selected>Hierarchical (compact)</option>
+              <option value="dagre">Hierarchical (wide)</option>
               <option value="fcose">Force-directed</option>
             </select>
           </label>
@@ -94,7 +107,11 @@
             <button id="shareButton" class="btn">Copy share link</button>
             <button id="clearCacheButton" class="btn btn-ghost">Clear cache</button>
           </div>
-          <textarea id="dataInput" rows="3" placeholder="Paste exported JSON here, then click Import"></textarea>
+          <textarea
+            id="dataInput"
+            rows="3"
+            placeholder="Paste exported JSON here, then click Import"
+          ></textarea>
         </div>
       </section>
 

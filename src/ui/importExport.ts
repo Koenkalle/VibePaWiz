@@ -68,5 +68,6 @@ function validate(obj: unknown): SerializedGraph | null {
     settings: g.settings,
     nodes: g.nodes,
     edges: g.edges,
+    ...(Array.isArray(g.expanded) ? { expanded: g.expanded } : {}),
   };
 }

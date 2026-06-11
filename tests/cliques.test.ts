@@ -54,4 +54,29 @@ describe('detectCliques', () => {
     const cliques = detectCliques(['A', 'B', 'C'], edges, meta);
     expect(cliques[0]!.nodes).toHaveLength(3);
   });
+
+  it('gives few chains maximally distinct hues regardless of lone-pair noise', () => {
+    // Two separate triangles (2 chains) plus lone-pair noise. The hue spread must
+    // be driven by the number of chains (2 → red & cyan), not the total clique
+    // count, which previously crowded every chain into the red end.
+    const m = (id: string): PaperMeta => ({ id, title: id, authors: [] });
+    const tri = (x: string, y: string, z: string): GraphEdge[] => [
+      { source: x, target: y },
+      { source: y, target: z },
+      { source: x, target: z },
+    ];
+    const edges: GraphEdge[] = [
+      ...tri('A', 'B', 'C'),
+      ...tri('D', 'E', 'F'),
+      { source: 'G', target: 'H' }, // lone pairs
+      { source: 'I', target: 'J' },
+    ];
+    const nodes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+    const chainColors = detectCliques(nodes, edges, m)
+      .filter((c) => c.nodes.length >= 3)
+      .map((c) => c.color);
+
+    expect(chainColors).toHaveLength(2);
+    expect(new Set(chainColors)).toEqual(new Set(['#ff0000', '#00ffff']));
+  });
 });
