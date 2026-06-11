@@ -79,10 +79,18 @@ npm run preview     # preview the production build
 
 ## Deployment
 
-`npm run build` produces a static `dist/` deployable anywhere. The included
-[GitHub Pages workflow](.github/workflows/deploy.yml) builds and deploys on every
-push to `master`. The Vite `base` defaults to `/VibePaWiz/` (the project-pages
-path); override it with `VPW_BASE=/ npm run build` for a custom domain or root.
+`npm run build` produces a static `dist/` deployable anywhere. Asset paths are
+**relative** (`base: './'`), so the build works at a user/org page
+(`https://<user>.github.io/`), a project page (`…/VibePaWiz/`), or a custom domain
+without configuration.
+
+**GitHub Pages:** the included [workflow](.github/workflows/deploy.yml) builds and
+deploys `dist/` on every push to `main`/`master`. For it to take effect you must set
+the Pages source to GitHub Actions — **Settings → Pages → Build and deployment →
+Source: “GitHub Actions”**. If it's left on “Deploy from a branch”, Pages serves the
+repo's source `index.html` (which points at the dev entry `/src/main.ts`) and the
+page fails with a `text/html` MIME error — that's the symptom of this misconfiguration,
+not a build problem.
 
 ## Credits
 

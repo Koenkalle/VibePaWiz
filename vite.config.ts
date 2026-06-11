@@ -1,9 +1,10 @@
 import { defineConfig } from 'vitest/config';
 
-// `base` matches the GitHub Pages project path (https://<user>.github.io/VibePaWiz/).
-// Override with VPW_BASE when deploying elsewhere (e.g. a custom domain → "/").
+// Relative base so the built site works wherever it's served — a user/org page
+// (https://<user>.github.io/), a project page (…/VibePaWiz/), or a custom domain —
+// without hardcoding the path. Override with VPW_BASE only if you need an absolute base.
 export default defineConfig({
-  base: process.env.VPW_BASE ?? '/VibePaWiz/',
+  base: process.env.VPW_BASE ?? './',
   build: {
     target: 'es2022',
     sourcemap: true,
