@@ -70,7 +70,10 @@ describe('GraphModel', () => {
       layout: 'dagre',
       collapse: 0,
       yearOrder: true,
+      prioritizeChains: true,
       simplifyChains: true,
+      mergeStyle: 'split',
+      collapseStyle: 'ratio',
     });
     const m2 = new GraphModel();
     m2.load(serialized);

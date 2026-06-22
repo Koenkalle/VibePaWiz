@@ -1,5 +1,6 @@
 import './style.css';
 import { detectCliques } from './graph/cliques';
+import { breakCycles } from './graph/cycles';
 import { expand } from './graph/expand';
 import { GraphModel } from './graph/model';
 import { visibleNodes } from './graph/visibility';
@@ -34,10 +35,13 @@ const progressEl = $<HTMLElement>('progress');
 const stopButton = $<HTMLButtonElement>('stopButton');
 const colorsInput = $<HTMLInputElement>('colors');
 const yearOrderInput = $<HTMLInputElement>('yearOrder');
+const prioritizeChainsInput = $<HTMLInputElement>('prioritizeChains');
 const simplifyInput = $<HTMLInputElement>('simplifyChains');
+const mergeStyleInput = $<HTMLSelectElement>('mergeStyle');
 const layoutSel = $<HTMLSelectElement>('layout');
 const collapseInput = $<HTMLInputElement>('collapse');
 const collapseShow = $<HTMLElement>('collapseShow');
+const collapseStyleSel = $<HTMLSelectElement>('collapseStyle');
 const historyEl = $<HTMLElement>('history');
 const cliqueListEl = $<HTMLElement>('cliqueList');
 const dataInput = $<HTMLTextAreaElement>('dataInput');
@@ -74,7 +78,10 @@ function readSettings(): Settings {
     layout: layoutSel.value as LayoutName,
     collapse: Number(collapseInput.value),
     yearOrder: yearOrderInput.checked,
+    prioritizeChains: prioritizeChainsInput.checked,
     simplifyChains: simplifyInput.checked,
+    mergeStyle: mergeStyleInput.value as Settings['mergeStyle'],
+    collapseStyle: collapseStyleSel.value as Settings['collapseStyle'],
   };
 }
 
@@ -87,13 +94,18 @@ function writeSettings(s: Settings): void {
   collapseInput.value = String(s.collapse);
   collapseShow.textContent = String(s.collapse);
   yearOrderInput.checked = s.yearOrder ?? true;
+  prioritizeChainsInput.checked = s.prioritizeChains ?? true;
   simplifyInput.checked = s.simplifyChains ?? true;
+  mergeStyleInput.value = s.mergeStyle ?? 'split';
+  collapseStyleSel.value = s.collapseStyle ?? 'ratio';
   updateLayoutControls();
 }
 
 /** Year ordering only applies to the layered (hierarchical) layouts. */
 function updateLayoutControls(): void {
-  yearOrderInput.disabled = layoutSel.value === 'fcose';
+  const force = layoutSel.value === 'fcose';
+  yearOrderInput.disabled = force;
+  prioritizeChainsInput.disabled = force;
 }
 
 function setStatus(msg: string): void {
@@ -114,14 +126,22 @@ function setRunning(running: boolean): void {
 function rerender(fit: boolean): void {
   const settings = readSettings();
   const nodeIds = model.getNodes().map((n) => n.id);
+  // Break citation cycles before any structural calculation, dropping each cycle's
+  // most anti-chronological edge. `kept` feeds every later step; `removed` is shown
+  // by the view but excluded from clique detection, columns, ordering and layout.
+  const { kept, removed } = breakCycles(nodeIds, model.getEdges(), (id) => model.getNode(id)?.year);
   const cliques: Clique[] = detectCliques(
     nodeIds,
-    model.getEdges(),
+    kept,
     (id) => model.getNode(id),
     settings.collapse,
+    settings.mergeStyle,
+    settings.collapseStyle,
   );
+  // Visibility still counts every real connection (incl. removed edges) so a cycle's
+  // papers stay on screen and the removed edge can be drawn between them.
   const visible = visibleNodes(model, cliques, expanded, seedId);
-  view.render(model, cliques, settings, visible, fit, seedId);
+  view.render(model, cliques, settings, visible, fit, seedId, removed);
   renderSidebar(cliqueListEl, cliques, {
     onHover: (i) => view.highlightChains([i], false),
     onSelect: (i) => view.highlightChains([i], true),
@@ -355,7 +375,10 @@ function bindEvents(): void {
   // Display toggles keep the current viewport; switching layout re-fits.
   colorsInput.addEventListener('change', () => flushRerender(false));
   yearOrderInput.addEventListener('change', () => flushRerender(false));
+  prioritizeChainsInput.addEventListener('change', () => flushRerender(false));
   simplifyInput.addEventListener('change', () => flushRerender(false));
+  mergeStyleInput.addEventListener('change', () => flushRerender(false));
+  collapseStyleSel.addEventListener('change', () => flushRerender(false));
   layoutSel.addEventListener('change', () => {
     updateLayoutControls();
     view.resetViewportTracking();

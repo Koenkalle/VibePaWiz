@@ -28,6 +28,16 @@ export type Direction = 'citers' | 'references' | 'both';
  */
 export type LayoutName = 'dagre-compact' | 'dagre' | 'fcose';
 
+/**
+ * How the collapse level decides whether two overlapping chains fuse:
+ * - `ratio`: by overlap fraction (shared / union ≥ 1/(collapse+1)) — scales with
+ *   chain size, so a single shared "hub" paper won't fuse chains until very loose.
+ * - `difference`: by total differing papers across both chains (≤ collapse).
+ * - `bridge`: today's per-side difference (≤ collapse) but only when chains share
+ *   at least an edge (≥2 papers), so a lone shared paper never bridges.
+ */
+export type CollapseStyle = 'ratio' | 'difference' | 'bridge';
+
 /** User-facing settings persisted in snapshots and share links. */
 export interface Settings {
   layers: number;
@@ -35,14 +45,28 @@ export interface Settings {
   colors: boolean;
   layout: LayoutName;
   collapse: number;
+  /** Which overlap metric the collapse level uses to fuse chains. No effect at Collapse 0. */
+  collapseStyle: CollapseStyle;
   /** Position nodes horizontally by publication year (dagre layout only). */
   yearOrder: boolean;
+  /**
+   * Weight dagre edges by how many chains they belong to, so colored chains are
+   * crossed/lengthened less than non-chain dotted edges (hierarchical layout only).
+   */
+  prioritizeChains: boolean;
   /**
    * Draw each citation chain as a single path and hide the redundant edges
    * inside it (the original's chain simplification). When off, those edges are
    * shown dashed.
    */
   simplifyChains: boolean;
+  /**
+   * What collapsing does to the chains it groups together: 'split' just recolours
+   * the related chains the same and leaves the layout unchanged; 'abridged'
+   * combines each group into one forward citation-ordered path (synthetic
+   * connectors fill gaps). No effect at Collapse 0.
+   */
+  mergeStyle: 'split' | 'abridged';
 }
 
 /** A maximal chain/clique of papers plus derived presentation data. */

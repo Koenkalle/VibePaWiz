@@ -49,6 +49,79 @@ adapter (which shoulders the scraping/ToS) could be added later as another
 - **Resilient loading**: a single cancellable run (Stop button), concurrency
   limiting, retry-with-backoff, and a size-guarded localStorage cache.
 
+## Display settings
+
+The **Display** panel controls how the loaded network is laid out and drawn.
+Everything here restyles the _current_ graph instantly — no re-fetch — and is
+saved into snapshots, JSON exports and share links. Year order and Prioritize
+chains apply only to the two hierarchical layouts and are disabled for
+Force-directed.
+
+### Layout
+
+Where the nodes are placed. Origin/oldest paper on the left in the hierarchical
+layouts.
+
+| Layout (UI label)          | Value           | What it does                                                                                            |
+| -------------------------- | --------------- | ------------------------------------------------------------------------------------------------------ |
+| **Hierarchical (compact)** | `dagre-compact` | Sugiyama-style layered layout using dagre's `network-simplex` ranker, which minimizes total edge length for a tighter result. |
+| **Hierarchical (wide)**    | `dagre`         | Same layered layout with the `tight-tree` ranker — a wider, more spread-out spacing of the ranks.       |
+| **Force-directed**         | `fcose`         | Physics-style [fcose](https://github.com/iVis-at-Bilkent/cytoscape.js-fcose) layout. No year axis; positions are remembered across restyles so toggling a flag doesn't reshuffle the graph. |
+
+### Toggles
+
+- **Color chains** — give each detected chain its own rainbow hue; edges shared by
+  several chains blend into a gradient. When off, chain edges are drawn a neutral
+  dark grey so the structure still reads without colour.
+- **Year order (left→right)** — position nodes horizontally by publication year
+  (oldest left), with a labelled background band per year. Papers with no year get
+  a dashed border and sit just right of the newest paper they cite (an educated
+  guess). _Hierarchical layouts only._
+- **Prioritize chains (fewer chain crossings)** — weight chain edges in the layout
+  so coloured chains stay straighter and are crossed/lengthened less, letting the
+  unimportant dotted non-chain edges absorb the crossings instead. _Hierarchical
+  layouts only._
+- **Simplify chains (hide redundant edges)** — draw each chain as a single forward
+  path and hide the redundant edges inside it (the original SciPaWiz chain
+  simplification). When off, those redundant intra-chain edges are shown dashed.
+
+### Chain collapsing
+
+Three controls work together to fuse overlapping chains into bigger groups. They
+have **no effect at Collapse 0** (every chain stays separate).
+
+**Collapse chains** (slider, 0–20) — how aggressively to fuse chains that share
+papers. 0 keeps every chain distinct; higher values fuse chains that overlap more
+loosely.
+
+**Collapse style** — the metric deciding whether two overlapping chains fuse at the
+current Collapse level (`overlap` = shared papers, `a`/`b` = chain lengths):
+
+| Style (UI label)    | Value        | Fuses two chains when…                                                                                                                   |
+| ------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overlap ratio**   | `ratio`      | their shared fraction `overlap / union ≥ 1/(collapse+1)`. Scales with chain size, so a single shared "hub" paper won't fuse chains until the slider is very loose. |
+| **Node difference** | `difference` | the total number of differing papers across both chains is `≤ collapse`.                                                                |
+| **Shared edge**     | `bridge`     | each chain's count of unique (non-shared) papers is `≤ collapse`, **and** they share at least an edge (≥ 2 papers) — so a lone shared paper never bridges. |
+
+**Merge style** — what fusing actually does to each grouped set of chains:
+
+| Style (UI label) | Value      | Effect                                                                                                                                      |
+| ---------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Split**        | `split`    | recolour the related chains the same hue but leave the layout untouched — the member chains stay drawn separately.                           |
+| **Abridged**     | `abridged` | combine each group into one forward, citation-ordered path; synthetic connectors fill any gaps so the merged chain reads as one continuous line. |
+
+### Reading the graph
+
+A few cues are always on, independent of the settings above:
+
+- **Node size & number** — both encode the paper's citer count _within the loaded
+  graph_ (bigger = cited by more loaded papers).
+- **Red-bordered node** — the seed/origin paper the graph was rooted on.
+- **Purple dotted arrow** — a backward-in-time citation (an older paper citing a
+  newer one); the arrow points at the newer paper.
+- **Red dashed arrow** — an edge dropped to break a citation cycle; drawn so the
+  anomaly stays visible but excluded from all layout and chain calculations.
+
 ## Tech stack
 
 [Vite](https://vite.dev) · TypeScript (strict) · [Cytoscape.js](https://js.cytoscape.org)

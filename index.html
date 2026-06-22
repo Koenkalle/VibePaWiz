@@ -76,9 +76,20 @@
             ><input type="checkbox" id="yearOrder" checked /> Year order (left→right)</label
           >
           <label class="inline"
+            ><input type="checkbox" id="prioritizeChains" checked /> Prioritize chains (fewer chain
+            crossings)</label
+          >
+          <label class="inline"
             ><input type="checkbox" id="simplifyChains" checked /> Simplify chains (hide redundant
             edges)</label
           >
+          <label class="inline">
+            Merge style
+            <select id="mergeStyle">
+              <option value="split" selected>Split</option>
+              <option value="abridged">Abridged</option>
+            </select>
+          </label>
           <label class="inline">
             Layout
             <select id="layout">
@@ -91,6 +102,14 @@
             Collapse chains
             <input type="range" id="collapse" min="0" max="20" value="0" />
             <span id="collapseShow" class="pill">0</span>
+          </label>
+          <label class="inline">
+            Collapse style
+            <select id="collapseStyle">
+              <option value="ratio" selected>Overlap ratio</option>
+              <option value="difference">Node difference</option>
+              <option value="bridge">Shared edge</option>
+            </select>
           </label>
         </div>
 

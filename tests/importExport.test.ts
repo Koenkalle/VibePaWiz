@@ -13,7 +13,10 @@ const graph: SerializedGraph = {
     layout: 'dagre',
     collapse: 0,
     yearOrder: true,
+    prioritizeChains: true,
     simplifyChains: true,
+    mergeStyle: 'split',
+    collapseStyle: 'ratio',
   },
   nodes: [
     { id: 'W1', title: 'Seed', authors: ['A'] },

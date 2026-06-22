@@ -2,9 +2,9 @@ import cytoscape from 'cytoscape';
 import type { Core, EdgeSingular, ElementDefinition, EventObject } from 'cytoscape';
 import dagre from '@dagrejs/dagre';
 import fcose from 'cytoscape-fcose';
-import { computeYearColumns } from '../graph/columns';
+import { columnAnchors, computeYearColumns, guessYears } from '../graph/columns';
 import type { GraphModel } from '../graph/model';
-import type { Clique, Settings } from '../types';
+import type { Clique, GraphEdge, Settings } from '../types';
 
 cytoscape.use(fcose);
 
@@ -13,6 +13,12 @@ const NODE_STROKE = '#2b2f33';
 const EDGE_GREY = '#9aa3ab';
 /** Neutral color for chain edges when "Color chains" is off. */
 const EDGE_NEUTRAL = '#444a50';
+/**
+ * Per-chain dagre edge-weight bonus when "Prioritize chains" is on. weight =
+ * 1 + chains*CHAIN_EDGE_WEIGHT, so a 0-chain dotted edge stays at 1 while chain
+ * edges are kept straighter and crossed less (and multi-chain edges most of all).
+ */
+const CHAIN_EDGE_WEIGHT = 200;
 
 export interface GraphViewCallbacks {
   /** Plain click on a node — expand the network from it. */
@@ -45,18 +51,55 @@ export function bendControlPoints(
   const weights: number[] = [];
   const distances: number[] = [];
   if (len > 0) {
+    // Each (weight, distance) is correct relative to the src→tgt line regardless
+    // of point order; sort by weight so the control points always run source→
+    // target, even when dagre routed the edge in the opposite (hi→lo) direction.
+    const pairs: Array<{ w: number; d: number }> = [];
     for (const p of points.slice(1, -1)) {
       const ex = p.x - src.x;
       const ey = p.y - src.y;
       const w = (ex * dx + ey * dy) / len2;
       if (w <= 0 || w >= 1) continue; // outside the segment → skip
-      weights.push(Number(w.toFixed(4)));
-      distances.push(Number(((-ex * dy + ey * dx) / len).toFixed(2)));
+      pairs.push({ w: Number(w.toFixed(4)), d: Number(((-ex * dy + ey * dx) / len).toFixed(2)) });
+    }
+    pairs.sort((a, b) => a.w - b.w);
+    for (const { w, d } of pairs) {
+      weights.push(w);
+      distances.push(d);
     }
   }
   // A single midpoint with zero offset renders as a straight line.
   if (weights.length === 0) return { weights: [0.5], distances: [0] };
   return { weights, distances };
+}
+
+/**
+ * Turn per-year x-extents (already in chronological order) into non-overlapping,
+ * forward-tiling band `[left, right]` rects. Boundaries are forced monotonic:
+ * each band starts where the previous ended, and the shared edge is the midpoint
+ * between adjacent years' extents — but clamped so a later year whose nodes
+ * drifted left of an earlier one can never invert or overlap the bands. The
+ * chronological order of the input is authoritative; positions only refine
+ * boundary placement.
+ */
+export function yearBandRects(
+  ext: Array<{ x1: number; x2: number }>,
+  pad: number,
+): Array<{ left: number; right: number }> {
+  const n = ext.length;
+  if (n === 0) return [];
+  const rects: Array<{ left: number; right: number }> = [];
+  let left = ext[0]!.x1 - pad;
+  let runningMax = -Infinity; // furthest-right node extent seen so far
+  for (let i = 0; i < n; i++) {
+    runningMax = Math.max(runningMax, ext[i]!.x2);
+    let right =
+      i === n - 1 ? runningMax + pad : Math.max((ext[i]!.x2 + ext[i + 1]!.x1) / 2, runningMax); // midpoint, forced forward
+    right = Math.max(right, left + 1); // never zero/negative width
+    rects.push({ left, right });
+    left = right; // next band starts where this one ends
+  }
+  return rects;
 }
 
 /** Per-edge presentation derived from clique membership. */
@@ -68,6 +111,10 @@ interface EdgeStyle {
   color: string;
   width: number;
   lineStyle: 'solid' | 'dashed';
+  /** How many chains (size ≥ 3) this edge is part of; drives dagre layout priority. */
+  priority: number;
+  /** Anti-chronological citation: an older paper cites a newer one (year(citer) < year(cited)). */
+  backward?: boolean;
   /** Two or more chain colors → render as a blended gradient. */
   gradient?: string[];
 }
@@ -115,6 +162,13 @@ export class GraphView {
             height: 'data(size)',
           },
         },
+        // Paper with no publication year: dashed border marks that its year-column
+        // position is approximated (placed just right of the newest paper it cites)
+        // rather than derived from a real year. Only set in the year-ordered layout.
+        {
+          selector: 'node.no-year',
+          style: { 'border-style': 'dashed' },
+        },
         // The origin/seed paper: thick red border so it's easy to spot.
         {
           selector: 'node.seed',
@@ -135,6 +189,38 @@ export class GraphView {
         {
           selector: 'edge.dashed',
           style: { 'line-style': 'dashed', opacity: 0.4 },
+        },
+        // Backward-in-time citation (older paper cites a newer one). The Cytoscape
+        // edge runs cited→citing, so its `source` is the newer paper: a source-arrow
+        // points at the newer paper, marking the anomalous forward-in-time direction.
+        {
+          selector: 'edge.backward',
+          style: {
+            'line-style': 'dotted',
+            'line-color': '#c026d3',
+            'source-arrow-shape': 'triangle',
+            'source-arrow-color': '#c026d3',
+            'arrow-scale': 0.8,
+            opacity: 0.95,
+          },
+        },
+        // An edge dropped to break a citation cycle: shown so the anomaly is visible
+        // (red, dashed, arrow from citer → cited) but excluded from every layout and
+        // calculation. Drawn straight since it never enters dagre's routing.
+        {
+          selector: 'edge.cycle-removed',
+          style: {
+            'curve-style': 'straight',
+            'line-style': 'dashed',
+            'line-color': '#dc2626',
+            'line-dash-pattern': [6, 3],
+            'target-arrow-shape': 'triangle',
+            'target-arrow-color': '#dc2626',
+            'arrow-scale': 0.9,
+            width: 2.5,
+            opacity: 0.85,
+            'z-index': 5,
+          },
         },
         {
           selector: 'edge.highlight',
@@ -219,23 +305,55 @@ export class GraphView {
     visible: Set<string>,
     fit: boolean,
     seedId: string | null,
+    removed: GraphEdge[] = [],
   ): void {
     const citerCounts = model.inDegrees();
     const maxCiters = Math.max(1, ...citerCounts.values());
+    const removedKeys = new Set(removed.map((e) => e.source + ' ' + e.target));
     const { styles, cliqueEdges, edgeCliques } = buildEdgeStyles(
       model,
       cliques,
       settings.colors,
       visible,
       settings.simplifyChains,
+      removedKeys,
     );
     this.cliqueEdges = cliqueEdges;
     this.edgeCliques = edgeCliques;
+
+    const hierarchical = settings.layout !== 'fcose';
+    // Flag undated papers only where their position is actually year-approximated:
+    // the year-ordered layout places them just right of the newest paper they cite.
+    const markNoYear = hierarchical && settings.yearOrder;
+
+    // Educated-guess year for undated papers: the newest year among the papers
+    // they cite (propagated through chains of undated citers), from the real
+    // citation edges so it's identical in Split and Abridged. Stored as `effYear`
+    // and used for the column placement and year bands below, so an undated node
+    // sits inside the year belt of the newest paper it cites instead of drifting
+    // into the gaps between belts. `year` stays the real value (tooltip + marker).
+    const guessYear = guessYears(
+      model
+        .getNodes()
+        .filter((n) => visible.has(n.id))
+        .map((n) => ({ id: n.id, year: n.year })),
+      model
+        .getEdges()
+        .filter((e) => visible.has(e.source) && visible.has(e.target))
+        .map((e) => ({ source: e.target, target: e.source })), // model is citer→cited; flip to cited→citing
+    );
 
     const elements: ElementDefinition[] = [];
     for (const node of model.getNodes()) {
       if (!visible.has(node.id)) continue;
       const citers = citerCounts.get(node.id) ?? 0;
+      const classes =
+        [
+          node.id === seedId ? 'seed' : '',
+          markNoYear && typeof node.year !== 'number' ? 'no-year' : '',
+        ]
+          .filter(Boolean)
+          .join(' ') || undefined;
       elements.push({
         data: {
           id: node.id,
@@ -245,24 +363,44 @@ export class GraphView {
           title: node.title,
           authors: node.authors,
           year: node.year,
+          // Real year, or the educated guess for undated papers (layout + bands only).
+          effYear: node.year ?? guessYear.get(node.id),
           venue: node.venue,
           citedByCount: node.citedByCount,
         },
-        classes: node.id === seedId ? 'seed' : undefined,
+        classes,
       });
     }
 
     const gradientEdges: Array<{ id: string; colors: string[] }> = [];
     for (const s of styles) {
+      const classes = [s.lineStyle === 'dashed' ? 'dashed' : '', s.backward ? 'backward' : '']
+        .filter(Boolean)
+        .join(' ');
       // Orient cited→citing so dagre puts the origin/oldest paper on the left.
       elements.push({
-        data: { id: s.id, source: s.target, target: s.source, color: s.color, width: s.width },
-        classes: s.lineStyle === 'dashed' ? 'dashed' : undefined,
+        data: {
+          id: s.id,
+          source: s.target,
+          target: s.source,
+          color: s.color,
+          width: s.width,
+          priority: s.priority,
+        },
+        classes: classes || undefined,
       });
       if (s.gradient) gradientEdges.push({ id: s.id, colors: s.gradient });
     }
 
-    const hierarchical = settings.layout !== 'fcose';
+    // Cycle-removed edges: drawn (citer → cited) only when both papers are on
+    // screen, and tagged so the layouts below skip them entirely.
+    for (const e of removed) {
+      if (!visible.has(e.source) || !visible.has(e.target)) continue;
+      elements.push({
+        data: { id: `cyc:${e.source}__${e.target}`, source: e.source, target: e.target },
+        classes: 'cycle-removed',
+      });
+    }
 
     // Remember positions so the force layout can stay put across re-renders.
     const prevPos = new Map<string, { x: number; y: number }>();
@@ -291,7 +429,7 @@ export class GraphView {
     if (hierarchical) {
       // network-simplex minimizes total edge length (compact); tight-tree spreads wider.
       const ranker = settings.layout === 'dagre-compact' ? 'network-simplex' : 'tight-tree';
-      this.applyHierarchicalLayout(ranker, settings.yearOrder);
+      this.applyHierarchicalLayout(ranker, settings.yearOrder, settings.prioritizeChains);
       if (shouldFit) this.fitView();
     } else {
       this.applyForceLayout(prevPos, layoutChanged, shouldFit);
@@ -363,12 +501,17 @@ export class GraphView {
       });
     }
 
-    const layout = this.cy.layout({
-      name: 'fcose',
-      animate: false,
-      fit: false,
-      randomize: fresh,
-    } as never);
+    // Lay out over everything except cycle-removed edges so they exert no force
+    // (all nodes are still included, so every node is positioned).
+    const layout = this.cy
+      .elements()
+      .not('.cycle-removed')
+      .layout({
+        name: 'fcose',
+        animate: false,
+        fit: false,
+        randomize: fresh,
+      } as never);
     if (shouldFit) layout.one('layoutstop', () => this.fitView());
     layout.run();
   }
@@ -380,14 +523,18 @@ export class GraphView {
    * SciPaWiz got from dagre-d3 + d3.curveBasis. `ranker` selects dagre's
    * layer-assignment heuristic (network-simplex = shorter edges).
    *
-   * Crucially, dagre runs over the **visible nodes and real edges only** — no
-   * invisible helper nodes ever enter the layout. When `yearOrder` is on, each
-   * node's column is computed separately (graph/columns) from year + intra-year
-   * depth; dagre is still used purely for the crossing-minimized vertical order,
-   * then nodes are placed at their year columns. This keeps the year axis from
-   * distorting the Sugiyama layout.
+   * When `yearOrder` is on, each node's column is computed separately
+   * (graph/columns) from year + intra-year depth and encoded as per-edge `minlen`
+   * constraints, so dagre's own Sugiyama pipeline lays the graph out on the
+   * year-column ranks (no post-hoc x override). Because `minlen` only ties
+   * *connected* nodes to each other, every node that no edge points at (a source —
+   * incl. isolated singletons and the leftmost node of a disconnected later-year
+   * component) would otherwise rank at the global origin and drift out of its year
+   * band. To prevent that we add an invisible per-column "spine" to the dagre graph
+   * (never to Cytoscape, never read back) and anchor each source to its column, so
+   * every component's absolute rank is pinned to its true year (see columnAnchors).
    */
-  private applyHierarchicalLayout(ranker: string, yearOrder: boolean): void {
+  private applyHierarchicalLayout(ranker: string, yearOrder: boolean, prioritize: boolean): void {
     const g = new dagre.graphlib.Graph({ multigraph: true });
     g.setGraph({ rankdir: 'LR', ranker, nodesep: 30, edgesep: 30, ranksep: 70 });
     g.setDefaultEdgeLabel(() => ({}));
@@ -395,32 +542,73 @@ export class GraphView {
     const nodeYears: Array<{ id: string; year?: number }> = [];
     this.cy.nodes().forEach((n) => {
       g.setNode(n.id(), { width: n.outerWidth(), height: n.outerHeight() });
-      const y = n.data('year');
+      // effYear = real year, or the educated guess for undated papers, so an
+      // undated node is laid out in the year column of the newest paper it cites.
+      const y = n.data('effYear');
       nodeYears.push({ id: n.id(), year: typeof y === 'number' ? y : undefined });
     });
+
+    // Cycle-removed edges are display-only: keep them out of the layout entirely.
+    const layoutEdges = this.cy.edges().filter((e: EdgeSingular) => !e.hasClass('cycle-removed'));
 
     const distinctYears = new Set(
       nodeYears.map((n) => n.year).filter((y): y is number => y !== undefined),
     ).size;
+    const colEdges = layoutEdges.map((e: EdgeSingular) => ({
+      source: e.source().id(),
+      target: e.target().id(),
+    }));
     // Year columns are encoded as per-edge minlen, so dagre's own (complete,
     // iterated) Sugiyama pipeline lays the graph out *on* the year-column ranks
-    // — no helper nodes, no post-hoc x override. minlen = the column difference
-    // is the minimum-length feasible ranking, which dagre reproduces exactly,
-    // and it still routes edges (smooth bend points) through intervening columns.
+    // — no post-hoc x override. minlen = the column difference is the
+    // minimum-length feasible ranking, which dagre reproduces exactly, and it
+    // still routes edges (smooth bend points) through intervening columns.
     const columns =
-      yearOrder && distinctYears >= 2
-        ? computeYearColumns(
-            nodeYears,
-            this.cy.edges().map((e) => ({ source: e.source().id(), target: e.target().id() })),
-          )
-        : null;
+      yearOrder && distinctYears >= 2 ? computeYearColumns(nodeYears, colEdges) : null;
 
-    this.cy.edges().forEach((e) => {
+    // When year columns are active, orient every dagre edge from its lower-column
+    // to its higher-column endpoint, so a backward-in-time citation (an older
+    // paper citing a newer one) can't drag the older paper rightward out of its
+    // year band. Forward and same-column edges keep their stored source→target
+    // order. The same orientation is reused on read-back to find each edge.
+    const dagreEnds = (sId: string, tId: string): [string, string] => {
+      if (!columns) return [sId, tId];
+      const cs = columns.get(sId) ?? 0;
+      const ct = columns.get(tId) ?? 0;
+      return ct >= cs ? [sId, tId] : [tId, sId];
+    };
+
+    layoutEdges.forEach((e) => {
+      const sId = e.source().id();
+      const tId = e.target().id();
+      const [lo, hi] = dagreEnds(sId, tId);
       const minlen = columns
-        ? Math.max(1, (columns.get(e.target().id()) ?? 0) - (columns.get(e.source().id()) ?? 0))
+        ? Math.max(1, Math.abs((columns.get(tId) ?? 0) - (columns.get(sId) ?? 0)))
         : 1;
-      g.setEdge(e.source().id(), e.target().id(), { minlen }, e.id());
+      // Weight chain edges above non-chain dotted edges (and multi-chain above
+      // single-chain), so dagre keeps higher-priority edges straighter and crosses
+      // them less — letting unimportant dotted edges absorb crossings instead.
+      const priority = (e.data('priority') as number | undefined) ?? 0;
+      const weight = prioritize ? 1 + priority * CHAIN_EDGE_WEIGHT : 1;
+      g.setEdge(lo, hi, { minlen, weight }, e.id());
     });
+
+    if (columns) {
+      // Invisible per-column spine that pins every component's absolute rank to
+      // its true year column. anchor_i sits at rank i (a length-1 chain); each
+      // anchored node is one rank past its column's anchor, so its rank is its
+      // global column (a uniform offset across all components). These helper
+      // nodes/edges never enter Cytoscape and are skipped on read-back below.
+      const { maxColumn, anchors } = columnAnchors(columns, colEdges);
+      const anchorId = (i: number): string => `__yearcol_anchor_${i}`;
+      for (let i = 0; i <= maxColumn; i++) {
+        g.setNode(anchorId(i), { width: 1, height: 1 });
+        if (i > 0) g.setEdge(anchorId(i - 1), anchorId(i), { minlen: 1 }, `__yearcol_spine_${i}`);
+      }
+      for (const { id, column } of anchors) {
+        g.setEdge(anchorId(column), id, { minlen: 1 }, `__yearcol_anchor_edge_${id}`);
+      }
+    }
 
     dagre.layout(g);
 
@@ -429,10 +617,16 @@ export class GraphView {
         const dn = g.node(n.id());
         if (dn) n.position({ x: dn.x, y: dn.y });
       });
-      this.cy.edges().forEach((e) => {
-        const de = g.edge(e.source().id(), e.target().id(), e.id());
-        const src = g.node(e.source().id());
-        const tgt = g.node(e.target().id());
+      layoutEdges.forEach((e) => {
+        const sId = e.source().id();
+        const tId = e.target().id();
+        // Look up the dagre edge with the same orientation we inserted it under,
+        // but project its routed points onto this edge's own source→target line
+        // (bendControlPoints sorts by weight, so dagre's point order is moot).
+        const [lo, hi] = dagreEnds(sId, tId);
+        const de = g.edge(lo, hi, e.id());
+        const src = g.node(sId);
+        const tgt = g.node(tId);
         if (!de || !src || !tgt) return;
         const { weights, distances } = bendControlPoints(src, tgt, de.points);
         e.style({
@@ -482,7 +676,8 @@ export class GraphView {
       const bb = n.boundingBox();
       top = Math.min(top, bb.y1);
       bottom = Math.max(bottom, bb.y2);
-      const y = n.data('year');
+      // effYear lets an undated node join the belt of the newest paper it cites.
+      const y = n.data('effYear');
       if (typeof y !== 'number') return;
       const ex = byYear.get(y);
       if (ex) {
@@ -501,9 +696,9 @@ export class GraphView {
     const rectY = top - HEAD;
     const rectH = bottom - top + HEAD + PAD;
     const ext = years.map((y) => byYear.get(y)!);
+    const rects = yearBandRects(ext, PAD);
     years.forEach((year, i) => {
-      const left = i === 0 ? ext[0]!.x1 - PAD : (ext[i - 1]!.x2 + ext[i]!.x1) / 2;
-      const right = i === years.length - 1 ? ext[i]!.x2 + PAD : (ext[i]!.x2 + ext[i + 1]!.x1) / 2;
+      const { left, right } = rects[i]!;
 
       const rect = document.createElementNS(ns, 'rect');
       rect.setAttribute('x', String(left));
@@ -556,11 +751,13 @@ function escapeHtml(s: string): string {
  * solid colored for chains (clique size ≥ 3), blended gradient for edges shared
  * by several chains, and dashed/de-emphasized for lone pairs or non-chain edges.
  *
- * When `simplify` is on, a chain is drawn as a single path through its sorted
- * nodes and the redundant edges inside the clique (real edges between two chain
- * members that are not consecutive on that path) are omitted entirely — they are
- * neither drawn nor fed to the layout. Also returns the maps for hover
- * highlighting in both directions.
+ * Each chain is drawn as its citation-ordered consecutive-pair path, so a plain
+ * clique (and everything at Collapse 0) is a clean forward single line. When
+ * `simplify` is on and an Abridged-merged chain's path has gaps (consecutive nodes
+ * with no real edge), each gap is bridged by a forward synthetic connector so the
+ * chain stays one continuous forward line. When `simplify` is off, only the path
+ * is coloured and the redundant edges are shown dashed (no connectors). Also
+ * returns the maps for hover highlighting in both directions.
  */
 function buildEdgeStyles(
   model: GraphModel,
@@ -568,13 +765,20 @@ function buildEdgeStyles(
   useColors: boolean,
   visible: Set<string>,
   simplify: boolean,
+  removed: Set<string> = new Set(),
 ): {
   styles: EdgeStyle[];
   cliqueEdges: Map<number, string[]>;
   edgeCliques: Map<string, number[]>;
 } {
-  // Only edges between two visible nodes are drawn.
-  const shown = model.getEdges().filter((e) => visible.has(e.source) && visible.has(e.target));
+  // Only edges between two visible nodes are drawn; cycle-removed edges are styled
+  // separately by the caller, so leave them out of the normal pipeline.
+  const shown = model
+    .getEdges()
+    .filter(
+      (e) =>
+        visible.has(e.source) && visible.has(e.target) && !removed.has(e.source + ' ' + e.target),
+    );
   const present = new Set(shown.map((e) => e.source + ' ' + e.target));
   const cliqueEdges = new Map<number, string[]>();
   const edgeCliques = new Map<string, number[]>();
@@ -582,6 +786,11 @@ function buildEdgeStyles(
   const chainColors = new Map<string, string[]>();
   // Node → indices of the size ≥ 3 chains it belongs to (for redundant-edge hiding).
   const bigChainOf = new Map<string, Set<number>>();
+  // Forward connectors bridging gaps in an Abridged-merged chain (consecutive
+  // citation-ordered nodes with no real edge): deduped by unordered node-pair and
+  // emitted as extra styles after the loop.
+  const spineConnectors: Array<{ id: string; older: string; newer: string; color: string }> = [];
+  const spineSeen = new Set<string>();
 
   cliques.forEach((clique, index) => {
     const isChain = clique.nodes.length >= 3;
@@ -592,18 +801,55 @@ function buildEdgeStyles(
         set.add(index);
       }
     }
+
+    // `clique.nodes` is in citation order (oldest first, forward in time).
+    const parent = new Map<string, string>(clique.nodes.map((n) => [n, n]));
+    const find = (x: string): string => {
+      while (parent.get(x) !== x) {
+        parent.set(x, parent.get(parent.get(x)!)!);
+        x = parent.get(x)!;
+      }
+      return x;
+    };
     const ids: string[] = [];
-    for (let i = 0; i + 1 < clique.nodes.length; i++) {
-      const a = clique.nodes[i]!;
-      const b = clique.nodes[i + 1]!;
+    const keep = (a: string, b: string): void => {
       const fwd = a + ' ' + b;
       const rev = b + ' ' + a;
       const key = present.has(fwd) ? fwd : present.has(rev) ? rev : null;
-      if (!key) continue;
+      if (!key) return;
       const id = edgeId(...(key.split(' ') as [string, string]));
       ids.push(id);
       edgeCliques.set(id, [...(edgeCliques.get(id) ?? []), index]);
       if (isChain) chainColors.set(key, [...(chainColors.get(key) ?? []), clique.color]);
+      parent.set(find(b), find(a));
+    };
+
+    // Pass A — the citation-ordered consecutive-pair path. For a true clique every
+    // pair has a real edge, so this alone draws a clean forward line.
+    for (let i = 0; i + 1 < clique.nodes.length; i++) keep(clique.nodes[i]!, clique.nodes[i + 1]!);
+
+    // Pass B — when simplifying, bridge each remaining consecutive gap with a
+    // forward synthetic connector so an Abridged-merged chain reads as one
+    // continuous forward line. Gaps only occur in Abridged unions; Split and
+    // Collapse-0 cliques are fully linked, so this adds nothing for them.
+    // Only chains (size ≥ 3) get connectors: their nodes are always visible, so a
+    // connector never points at a node that isn't drawn. Lone pairs (size 2) may
+    // include a hidden node and must not be bridged.
+    if (simplify && isChain) {
+      for (let i = 0; i + 1 < clique.nodes.length; i++) {
+        const older = clique.nodes[i]!;
+        const newer = clique.nodes[i + 1]!;
+        if (find(older) === find(newer)) continue;
+        if (!visible.has(older) || !visible.has(newer)) continue;
+        parent.set(find(newer), find(older));
+        const seenKey = older + '|' + newer;
+        if (spineSeen.has(seenKey)) continue;
+        spineSeen.add(seenKey);
+        const id = `syn:${older}__${newer}`;
+        spineConnectors.push({ id, older, newer, color: useColors ? clique.color : EDGE_NEUTRAL });
+        ids.push(id);
+        edgeCliques.set(id, [...(edgeCliques.get(id) ?? []), index]);
+      }
     }
     if (ids.length) cliqueEdges.set(index, ids);
   });
@@ -620,17 +866,27 @@ function buildEdgeStyles(
     const key = e.source + ' ' + e.target;
     const colors = chainColors.get(key) ?? [];
     const id = edgeId(e.source, e.target);
-    const base = { id, source: e.source, target: e.target };
+    // e.source cites e.target; flag the anomaly where the citer predates the cited.
+    const yCiter = model.getNode(e.source)?.year;
+    const yCited = model.getNode(e.target)?.year;
+    const backward = typeof yCiter === 'number' && typeof yCited === 'number' && yCiter < yCited;
+    const base = { id, source: e.source, target: e.target, backward };
 
     if (colors.length === 0) {
       // Redundant intra-chain edge (not on any chain path): hide when simplifying.
       if (simplify && sharesChain(e.source, e.target)) continue;
       // Non-chain / lone pair: dashed and de-emphasized.
-      styles.push({ ...base, color: EDGE_GREY, width: 1.5, lineStyle: 'dashed' });
+      styles.push({ ...base, color: EDGE_GREY, width: 1.5, lineStyle: 'dashed', priority: 0 });
     } else if (!useColors) {
-      styles.push({ ...base, color: EDGE_NEUTRAL, width: 4, lineStyle: 'solid' });
+      styles.push({
+        ...base,
+        color: EDGE_NEUTRAL,
+        width: 4,
+        lineStyle: 'solid',
+        priority: colors.length,
+      });
     } else if (colors.length === 1) {
-      styles.push({ ...base, color: colors[0]!, width: 4, lineStyle: 'solid' });
+      styles.push({ ...base, color: colors[0]!, width: 4, lineStyle: 'solid', priority: 1 });
     } else {
       // Multi-chain: thicker, blended gradient of the chains' colors.
       styles.push({
@@ -639,12 +895,28 @@ function buildEdgeStyles(
         width: 4 + 2 * (colors.length - 1),
         lineStyle: 'solid',
         gradient: colors,
+        priority: colors.length,
       });
     }
+  }
+
+  // Spine connectors are not real edges, so emit them directly (citer→cited
+  // orientation: newer → older, matching real edges so the layout reads them the
+  // same way).
+  for (const c of spineConnectors) {
+    styles.push({
+      id: c.id,
+      source: c.newer,
+      target: c.older,
+      color: c.color,
+      width: 4,
+      lineStyle: 'solid',
+      priority: 1,
+    });
   }
 
   return { styles, cliqueEdges, edgeCliques };
 }
 
 // Exposed for unit tests.
-export const __test = { buildEdgeStyles, EDGE_GREY, EDGE_NEUTRAL };
+export const __test = { buildEdgeStyles, EDGE_GREY, EDGE_NEUTRAL, yearBandRects };

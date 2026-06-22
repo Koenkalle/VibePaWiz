@@ -1,4 +1,5 @@
-import type { Clique, GraphEdge, PaperMeta } from '../types';
+import type { Clique, CollapseStyle, GraphEdge, PaperMeta } from '../types';
+import { guessYears } from './columns';
 import { rainbow } from '../viz/colors';
 
 const STOPWORDS = new Set([
@@ -133,25 +134,137 @@ function bronKerbosch(adj: Map<string, Set<string>>): string[][] {
   return cliques;
 }
 
-/** Merge overlapping long chains within the collapse tolerance (ported behavior). */
-function collapseCliques(cliques: string[][], collapse: number): string[][] {
-  if (collapse <= 0) return cliques;
-  const long = cliques.filter((c) => c.length > 2);
-  const small = cliques.filter((c) => c.length <= 2);
-  for (let i = 0; i < long.length; i++) {
-    const a = long[i]!;
-    if (a.length === 0) continue;
-    for (let j = i + 1; j < long.length; j++) {
-      const b = long[j]!;
-      if (b.length === 0) continue;
-      const overlap = a.filter((e) => b.includes(e)).length;
-      if (overlap !== 0 && a.length - overlap <= collapse && b.length - overlap <= collapse) {
-        long[i] = [...new Set([...a, ...b])];
-        long[j] = [];
+/**
+ * Order a chain's nodes oldest-first so the drawn chain line only ever moves
+ * forward along the year-column axis. The primary key is effective year (real year,
+ * or the guessed year for an undated paper — the same value the layout positions by,
+ * see effYearOf in detectCliques); ties fall to dated-before-undated, then the
+ * global topological `orderIndex`.
+ *
+ * Citations are only a *secondary* constraint, and only when chronological (the
+ * citer is no older than the paper it cites): such an edge keeps the cited paper
+ * ahead of its citer, which within one year reproduces the layout's same-year
+ * citation depth. An ANTI-chronological citation (an older paper citing a newer one
+ * — these survive cycle-breaking when they aren't part of a cycle) is deliberately
+ * NOT a constraint: honouring it would force the newer cited paper ahead of the
+ * older citer and make the chain run backward in time. With those edges dropped,
+ * the order is provably non-decreasing in effective year, so it matches the layout's
+ * left→right column order and the path never zig-zags back in time.
+ */
+function citationOrder(
+  nodes: string[],
+  directed: Map<string, Set<string>>,
+  effYearOf: (id: string) => number | undefined,
+  orderIndex: Map<string, number>,
+): string[] {
+  const inSet = new Set(nodes);
+  // Per node, the in-chain papers it cites that are not yet placed — but only its
+  // chronological (forward) citations. An anti-chronological citation (citer older
+  // than the cited paper) is left out, so it can't force the newer cited paper ahead
+  // of the older citer; effective year alone orders that pair (see earlier()).
+  const waiting = new Map<string, Set<string>>();
+  for (const n of nodes) {
+    const yc = effYearOf(n);
+    const refs = new Set<string>();
+    for (const t of directed.get(n) ?? []) {
+      if (!inSet.has(t)) continue;
+      const yt = effYearOf(t);
+      if (yc !== undefined && yt !== undefined && yc < yt) continue; // backward → not a constraint
+      refs.add(t);
+    }
+    waiting.set(n, refs);
+  }
+  // True when `a` should be placed before `b` among ready (citation-unordered) nodes.
+  const earlier = (a: string, b: string): boolean => {
+    const ya = effYearOf(a);
+    const yb = effYearOf(b);
+    if (ya !== undefined && yb !== undefined && ya !== yb) return ya < yb;
+    if (ya !== undefined && yb === undefined) return true;
+    if (ya === undefined && yb !== undefined) return false;
+    // orderIndex is newest-first, so an older paper has the higher index.
+    return (orderIndex.get(a) ?? 0) > (orderIndex.get(b) ?? 0);
+  };
+
+  const remaining = new Set(nodes);
+  const out: string[] = [];
+  while (remaining.size) {
+    let ready = [...remaining].filter((n) => waiting.get(n)!.size === 0);
+    if (ready.length === 0) ready = [...remaining]; // cycle: break by the same key
+    let pick = ready[0]!;
+    for (const c of ready) if (earlier(c, pick)) pick = c;
+    out.push(pick);
+    remaining.delete(pick);
+    for (const n of remaining) waiting.get(n)!.delete(pick);
+  }
+  return out;
+}
+
+/**
+ * Decide whether two overlapping chains fuse at the given collapse level. `collapse`
+ * is the slider value (> 0 here); `overlap` is the count of shared nodes (≥ 1),
+ * `a`/`b` the chain lengths. The `collapseStyle` picks the metric (see CollapseStyle):
+ * - `ratio`: shared fraction `overlap/union ≥ 1/(collapse+1)` (size-aware).
+ * - `difference`: total differing nodes `uniqueA + uniqueB ≤ collapse`.
+ * - `bridge`: per-side difference `≤ collapse`, but only when they share an edge
+ *   (`overlap ≥ 2`) so a single shared paper never bridges.
+ */
+function chainsMerge(
+  collapse: number,
+  collapseStyle: CollapseStyle,
+  overlap: number,
+  a: number,
+  b: number,
+): boolean {
+  const uniqueA = a - overlap;
+  const uniqueB = b - overlap;
+  switch (collapseStyle) {
+    case 'difference':
+      return uniqueA + uniqueB <= collapse;
+    case 'bridge':
+      return overlap >= 2 && uniqueA <= collapse && uniqueB <= collapse;
+    case 'ratio':
+    default:
+      // overlap / union ≥ 1/(collapse+1), rearranged to stay integer-only.
+      return overlap * (collapse + 1) >= a + b - overlap;
+  }
+}
+
+/**
+ * Group long (size ≥ 3) chains for collapsing: single-linkage union-find where two
+ * chains merge when they share a node AND satisfy the `collapseStyle` metric for the
+ * given `collapse` level (see chainsMerge). Returns the group root index per chain
+ * (collapse ≤ 0 → every chain is its own group). Whether a group is then combined
+ * into one path (Abridged) or just recoloured together (Split) is decided by the
+ * caller.
+ */
+function mergeGroupIds(long: string[][], collapse: number, collapseStyle: CollapseStyle): number[] {
+  const parent = long.map((_, i) => i);
+  const find = (i: number): number => {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]!]!;
+      i = parent[i]!;
+    }
+    return i;
+  };
+  if (collapse > 0) {
+    for (let i = 0; i < long.length; i++) {
+      const aSet = new Set(long[i]!);
+      for (let j = i + 1; j < long.length; j++) {
+        const b = long[j]!;
+        let overlap = 0;
+        for (const e of b) if (aSet.has(e)) overlap++;
+        if (
+          overlap !== 0 &&
+          chainsMerge(collapse, collapseStyle, overlap, long[i]!.length, b.length)
+        ) {
+          const ri = find(i);
+          const rj = find(j);
+          if (ri !== rj) parent[rj] = ri;
+        }
       }
     }
   }
-  return long.filter((c) => c.length > 0).concat(small);
+  return long.map((_, i) => find(i));
 }
 
 function topKeywords(nodes: string[], meta: (id: string) => PaperMeta | undefined): string[] {
@@ -188,11 +301,25 @@ export function detectCliques(
   edges: GraphEdge[],
   meta: (id: string) => PaperMeta | undefined,
   collapse = 0,
+  mergeStyle: 'split' | 'abridged' = 'split',
+  collapseStyle: CollapseStyle = 'ratio',
 ): Clique[] {
   if (nodes.length === 0) return [];
   const directed = directedAdjacency(nodes, edges);
   const order = acyclicTopoOrder(nodes, directed);
   const orderIndex = new Map(order.map((id, i) => [id, i]));
+
+  // Effective year per node: the real year, or the educated guess for an undated
+  // paper (the newest paper it cites). This is the SAME key the year-column layout
+  // positions by (graph/columns guessYears + cytoscape `effYear`), so ordering each
+  // chain by it keeps the drawn path's left→right order in step with the layout.
+  // `edges` are citer→cited; guessYears wants cited→citing, so flip them.
+  const guess = guessYears(
+    nodes.map((id) => ({ id, year: meta(id)?.year })),
+    edges.map((e) => ({ source: e.target, target: e.source })),
+  );
+  const effYearOf = (id: string): number | undefined => meta(id)?.year ?? guess.get(id);
+  const orderNodes = (ns: string[]): string[] => citationOrder(ns, directed, effYearOf, orderIndex);
 
   // Undirected projection for clique finding.
   const undirected = new Map<string, Set<string>>(nodes.map((n) => [n, new Set<string>()]));
@@ -203,22 +330,47 @@ export function detectCliques(
     }
   }
 
-  let cliqueNodes = bronKerbosch(undirected);
-  const byOrder = (a: string, b: string) => (orderIndex.get(a) ?? 0) - (orderIndex.get(b) ?? 0);
-  cliqueNodes.forEach((c) => c.sort(byOrder));
-  cliqueNodes = collapseCliques(cliqueNodes, collapse);
-  cliqueNodes.forEach((c) => c.sort(byOrder));
-  cliqueNodes.sort((a, b) => b.length - a.length);
+  // Each chain's nodes in citation order (forward in time; see citationOrder).
+  const raw = bronKerbosch(undirected).map(orderNodes);
+  const long = raw.filter((c) => c.length >= 3);
+  const small = raw.filter((c) => c.length < 3);
+  const groupRoot = mergeGroupIds(long, collapse, collapseStyle);
 
-  // Only chains (size ≥ 3) are colored. Spread hues over the number of chains so
-  // few chains are maximally distinct; assign by topological position so that —
-  // once there are many — chains close in the citation timeline get similar hues.
+  // Decide the drawn chains and a group key per chain. Abridged combines each group
+  // into one citation-ordered path; Split keeps the member chains separate.
+  let chains: string[][];
+  let chainGroupKey: number[];
+  if (mergeStyle === 'abridged') {
+    const byGroup = new Map<number, Set<string>>();
+    long.forEach((c, i) => {
+      const g = groupRoot[i]!;
+      let set = byGroup.get(g);
+      if (!set) byGroup.set(g, (set = new Set()));
+      for (const n of c) set.add(n);
+    });
+    const entries = [...byGroup.entries()];
+    chains = entries.map(([, set]) => orderNodes([...set]));
+    chainGroupKey = entries.map(([g]) => g);
+  } else {
+    chains = long;
+    chainGroupKey = groupRoot;
+  }
+
+  // Colour by group: each distinct group gets a rainbow hue by its earliest
+  // (highest-index) topological position, so members of a merge share a colour.
   const minOrder = (c: string[]) => Math.min(...c.map((id) => orderIndex.get(id) ?? 0));
-  const chains = cliqueNodes.filter((c) => c.length >= 3);
+  const groupMin = new Map<number, number>();
+  chains.forEach((c, i) => {
+    const g = chainGroupKey[i]!;
+    groupMin.set(g, Math.min(groupMin.get(g) ?? Infinity, minOrder(c)));
+  });
+  const rankedGroups = [...groupMin.keys()].sort((a, b) => groupMin.get(a)! - groupMin.get(b)!);
+  const groupColor = new Map<number, string>();
+  rankedGroups.forEach((g, rank) => groupColor.set(g, rainbow(rankedGroups.length, rank)));
   const colorOf = new Map<string[], string>();
-  [...chains]
-    .sort((a, b) => minOrder(a) - minOrder(b))
-    .forEach((c, rank) => colorOf.set(c, rainbow(chains.length, rank)));
+  chains.forEach((c, i) => colorOf.set(c, groupColor.get(chainGroupKey[i]!) ?? '#9aa3ab'));
+
+  const cliqueNodes = chains.concat(small).sort((a, b) => b.length - a.length);
 
   return cliqueNodes.map((nodeIds): Clique => {
     const years = nodeIds
